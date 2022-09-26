@@ -1,0 +1,15 @@
+.Rproj.user
+.Rhistory
+.RData
+_book
+_bookdown_files
+rsconnect
+data/
+*.dbf
+*.shp
+*.shx
+*.prj
+*.csv
+*.rds
+*.RDS
+nul

@@ -1,0 +1,271 @@
+# Synthesis 
+This section synthesizes the information generated through the mapping exercise and the discussions which were had when presenting the results of this project. 
+
+```{r chp7_1, include=F}
+library(sf)
+library(leaflet)
+library(raster)
+library(terra)
+library(stars)
+library(nngeo)
+end_sf <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp")
+merged_shp <- st_read("data/spatial/area_of_interest/aoi.shp")
+```
+
+## General conclusions
+This modelling exercise has demonstrated that we cannot take for granted that the existing protected area network is resilient to future climate change. One of the fundamental assumptions prevalent in the current literature is that species ranges will shift to accommodate climate changed related alterations in thermal and moisture niches - typically moving up mountainsides to reach cooler, wetter locations. However, the majority of the parks assessed here showed substantial hurdles in the capacity for wildlife to respond to such changes. High elevation areas (>1500m) are typically cutoff from their low elevation counterparts by substantial anthropogenic disturbance and unprotected habitats. This, however, is not always the case, several "gold standard" climate corridors exist which are 100% protect with good quality forest (notably in Panama), but these are the exception not the rule. 
+
+
+### Country comparisons
+Given the findings of the [least cost paths](#lcp) section, we find clear differences in the degree to which lowland protected areas are connected to high elevation projected areas. We believe these differences directly relate to how resilient protected areas are to future climate change. Of the countries assessed, Panama contains the most connected climate corridors, largely due to the size and scale of the Darien Protected area. Costa Rica follows Panama, principally due to the importance of La Amistad protected area, a park where the climate corridors connect for 25 different lowland protected areas. The quality of putative climate corridors in El Salvador were very low, largely due to the high degree of human modification in this region. Whilst other countries fell between the two extremes.  
+
+## Important high elevation areas
+Circuitscape modelling revealed that La Amistad is a crucial high elevation end point for many of the putative climate corridors. This is likely owing to it being large, contiguous, and one of only a few options in Costa Rica and Panama. Other important areas include the complex of smaller high elevation protected areas in western Honduras (including Opalaca, El Jilguero and Celaque), and the larger Sierra de las Minas and Cuenca del Largo Atitlan in Guatamala. Robust management and expansion of these locations may be key to having a resilient protected areas system in the future.   
+
+
+## Priority climate corridors
+We used a least-cost-paths approach to highlight ten broad geographic regions which would be beneficial targets for restoration of ridge to reef connectivity. These regions were spread throughout central American countries, however it was notable that there were non-selected in El Salvador, as the protected areas there are typically small and nested within a highly disturbed landscape. Circuitscape models revealed the variety of challenges facing restoration initiatives looking to connect lowland and highland habitats: lowland protected areas are typically surrounded by high degrees of human modification and poor quality (low biomass) forest. The three most promising locations for restoration, of the ten assessed, appear to be Osa Peninsula, Rio Platano and Indio Maiz - as they involve large lowland protected areas connecting to large upland areas across manageable distances.  
+
+
+## Unprotected high elevation (>1500m) habitat?
+In this exercise we only consider protected high elevation habitats. However, there is the potential for non-protected high elevation habitats to contribute to climate corridors. The plot below highlights the unprotected high elevation (>1500m) forests (>25 Mg C ha−1). 
+
+
+```{r, include=F, message=F, warning=F}
+library(terra)
+
+# Import the biomass layer
+nasa_biomass <- rast("data/spatial/biomass/NASA_biomass_desnity_estimation.tif")
+#plot(nasa_biomass, las=1, main="")
+
+# Import the high elevation layer
+dem_raster <- rast("data/spatial/SRTM90_V4/SRTM90_V4.elevation.tif")
+#plot(dem_raster, las=1, main="")
+high_raster <- dem_raster
+# Make a binary raster
+high_raster[high_raster<1500] <- NA
+high_raster[high_raster>=1500] <- 1
+#plot(high_raster)
+# Convert to polygon
+high_terra = as.polygons(high_raster)
+#plot(high_poly)
+
+# Crop the biomas layer to the high elvation zones
+
+high_forest_biomass <- crop(nasa_biomass, high_terra, mask=T)
+# Make it binary
+high_forest_binary <- high_forest_biomass
+high_forest_binary[high_forest_binary<25] <- NA
+high_forest_binary[high_forest_binary>25] <- 1
+
+plot(high_forest_binary, col="red")
+
+
+# Import the protected areas
+high_pa <- vect("data/spatial/area_of_interest/high_elevation_pas.shp")
+plot(high_pa, add=T, col="green")
+high_pa_sf <- sf::st_as_sf(high_pa)
+high_pa_ras <- rasterize(high_pa,high_forest_binary, 
+             field=100, background=1)
+plot(high_pa_ras)
+
+non_protected_ras <- high_pa_ras*high_forest_binary
+non_protected_ras[non_protected_ras==100] <- NA
+
+plot(non_protected_ras, col="red")
+plot(high_pa, col="green", add=T, border=NA)
+
+# convert to polygons
+high_forest_poly  <- as.polygons(non_protected_ras)
+
+high_forest_sf <- sf::st_as_sf(high_forest_poly)
+high_pa_sf <- sf::st_as_sf(high_pa)
+
+
+```
+
+
+```{r, message=F, warning=F, echo=F}
+leaflet() %>%
+   addProviderTiles("Esri.WorldGrayCanvas", group="Basic") %>%
+   addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+   addProviderTiles("OpenStreetMap", group="OSM") %>%
+#  addRasterImage(high_forest_ras, group="Raster") %>% 
+  addPolygons(data=high_pa_sf, fillColor = "green",
+               label = high_pa_sf$NAME, stroke=F, fillOpacity = 0.6, , group="Protected") %>% 
+  addPolygons(data=high_forest_sf, fillColor = "red",
+               , stroke=F, fillOpacity = 0.6, group="Unprotected") %>%
+  addLayersControl(
+    baseGroups = c("Basic", "Satellite", "OSM"),
+    overlayGroups = c("Protected", "Unprotected")) %>% 
+addLegend(colors=c("red", "green"), labels = c("unprotected", "protected"),
+    title = "High elevation forest status")
+  
+```
+
+
+We estimate that (`r round(as.numeric(sum(st_area(high_pa_sf))/(1000*1000)),1)`)  km^2^ of high elevation (>1500m) forests are protected. However, substantial tracts of important forest remain unprotected (`r round(as.numeric(sum(st_area(high_forest_sf))/(1000*1000)),1) `) km^2^, the vast majority of such forests lie in Guatemala and Honduras. There appears to be limited potential for high elevation protected area expansion outside of these counties, although some expansions may be possible around La Amistad (Costa Rica and Panama). 
+
+## Existing corridors
+Given that we have identified putative climate corridors, it follows that we should ask if these corridors are already covered by existing/proposed corridors. Below we explore the overlay of the Mesoamerican Biological Corridors (MBCs) with those identified in this mapping exercise.
+
+### Least cost paths
+There is a certain degree of congruence between the least cost paths and the existing MBCs, however they are highly region and context specific.  
+```{r, eval=T, echo=F, message=F, warning=F, include=F}
+# Read in the corridor layer
+CBM_shp<- st_read("data/spatial/CBM Regional/cbm_regional.shp", quiet = TRUE)
+end_poly <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp")
+end_poly_17N <- st_transform(end_poly, 31971)
+
+st_crs(CBM_shp) <- 4326
+table(CBM_shp$PAIS)
+corr_shp <- CBM_shp[CBM_shp$PAIS!="Mexico",]
+# Remove empty geometries
+table(length(CBM_shp$geometry[1]))
+
+CBM_shp <- CBM_shp[st_is_empty(CBM_shp$geometry)==FALSE,]
+CBM_shp<- CBM_shp[CBM_shp$AREAKM2>0.01,]
+CBM_shp <- st_make_valid(CBM_shp)
+
+ter_finalists_shp_wgs <- st_read("data/Chapter7/final_ter_lcps.shp")
+
+
+# Prep raster
+res_cur_norm <- rast("data/Chapter6/Coastal_pa_all_low_res/output/pas_lowres_normalised_curmap.asc")
+terra::crs(res_cur_norm) <- "EPSG:31971"
+
+res_clamp <- clamp(res_cur_norm, upper=0.5)
+# Make low current NA
+res_clamp <- app(res_clamp, fun=function(x){ x[x < 0.02] <- NA; return(x)} )
+#plot(res_clamp)
+
+end_poly_17N <- st_as_sf(end_poly_17N)
+
+#And the fragment importance like this:
+res_cur_norm_ras <- raster(res_clamp)
+crs(res_cur_norm_ras) <- "EPSG:31971"
+res_cur_norm_mask <- mask(res_cur_norm_ras, end_poly_17N, inverse=T)
+
+pal <- colorNumeric(c("#0C2C84", "#41B6C4", "#FFFFCC"), values(res_cur_norm_mask),
+  na.color = "transparent")
+
+
+
+```
+
+
+```{r, eval=T, echo=F, message=F, warning=F}
+leaflet() %>%
+  addProviderTiles("Esri.WorldGrayCanvas", group="Simple") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+#  addRasterImage(res_cur_norm_mask, group="Raster", colors = pal) %>%  #  
+
+  #addPolylines(data=priority_man_wgs, weight = 5, color = "white",
+  #             label = priority_man_wgs$ID, group="Priority paths") %>% 
+   addPolygons(data=end_sf, fillColor = "red",
+                label = end_sf$NAME, group="High_pa", stroke=F, fillOpacity = 1)%>% 
+   addPolygons(data=corr_shp, fillColor = "yellow",
+                label = end_sf$NAME, group="Corridor", stroke=F, fillOpacity = 1) %>% 
+  addPolylines(data=ter_finalists_shp_wgs, weight = 2, color = "black",
+                label = ter_finalists_shp_wgs$start_pa, group="LCP") %>% 
+  addLayersControl(
+    baseGroups = c("Simple", "Satellite"),
+    overlayGroups = c( "High_pa","Corridor", "LCP" )) # %>% 
+
+```
+
+
+### Circuitscape
+As with the LCP's, effective corridors should map onto regions with high current flow. This is not always the case, some corridors appear to be well represented, others less so.
+
+```{r, echo=F, message=F, warning=F}
+leaflet() %>%
+  addProviderTiles("Esri.WorldGrayCanvas", group="Simple") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addRasterImage(res_cur_norm_mask, group="Raster", colors = pal) %>%  #  
+
+  #addPolylines(data=priority_man_wgs, weight = 5, color = "white",
+  #             label = priority_man_wgs$ID, group="Priority paths") %>% 
+   addPolygons(data=end_sf, fillColor = "red",
+                label = end_sf$NAME, group="High_pa", stroke=F, fillOpacity = 1)%>% 
+   addPolygons(data=corr_shp, fillColor = "yellow",
+                label = end_sf$NAME, group="Corridor", stroke=F, fillOpacity = 1) %>% 
+  addLayersControl(
+    baseGroups = c("Simple", "Satellite"),
+    overlayGroups = c("Raster", "High_pa","Corridor" )) # %>% 
+
+```
+
+### Five great forests
+In 2021 WCS and partner organisations established the "Five Great Forests" initiative, which looked to protect five of the key remaining continuous forests in central america. 
+
+```{r, echo=F}
+knitr::include_graphics("data/images/Great_forests.PNG")
+```
+
+
+The degree to which these forest contribute to climate resilience and the putative climate corridors varies by location:
+
+- **Darien**: Darien is a large and well connected protected area that has its own high elevation patches. Consequently it is a fantastic example of a completely conserved climate corridor. All of the high elevation areas it connects to are already conserved. Not much else can be said about this region.
+
+- **La Amistad**: Represents a critically important high elevation hub for many of the protected areas in Panama, Costa Rica and Nicaragua - the importance of La Amistad can not be overstated. Outside of La Amistad, there are several contiguous high elevation forests that are not yet protected, to expansion is possible. However, the size of La Amistad is already formidable. Considerable effort should be put in to connecting low elevation protected areas, such as Corcovado and Indio Maiz, to ensure that these landscapes are resilient to future climate change. 
+
+- **Indio Maiz and Tortugero complex**: As stated above, Indio Maiz's path of least resistance is to La Amistad, it contains no high elevation regions of its own. This poses a key logistical challenge in that it spans the Nicaragua - Costa Rica Border. Tortugero has a second potential corridor, through the habitat around Universidad EARTH, however it passes through areas of high anthropogenic disturbance. Substantial investment connecting these two areas to La Amistad would be high beneficial for climate resilience.
+
+- **Moskitia**: Moskitia has two tiny patches of high elevation forests within its borders, however these are not sufficient for true climate resilience. Examination of the [circuitscape current flow](#circuitscape) suggest that animals will flow to the network of highland protected areas in Honduras. There are some putative wildlife corridors in the region, but none capture the flow dynamics predicted by circuitscape. The distances are also not trivial, spanning ~250 km. Establishing and protecting functional connectivity of the Moskitia complex of protected areas will be a considerable challenge.  
+
+- **Selva Maya**: The majority of this location lies outside of the current area of interest, thus the conclusions will not be robust. Future work should address the climate connectivity of this region. 
+
+### Mangroves
+
+One of the initial aims of this project was do repeat the analysis we have completed for lowland protected areas for mangroves. However in the course of conducting and discussing this work it became clear that the link between mangroves and high elevation protected areas was not clear. Of greater importance to mangroves is the state of the watersheds which service them. Future work could explore the general disturbance of watershed servicing mangroves (red = high disturbance; blue = low disturbance).
+
+```{r, eval=T, echo =F, message=F, include=F}
+continental_divide <- st_read("data/spatial/hybas_na_lev01-12_v1c/hybas_na_lev02_v1c.shp")
+watersheds <- st_read("data/spatial/hybas_na_lev01-12_v1c/hybas_na_lev07_v1c.shp")
+watersheds <- st_make_valid(watersheds)
+#plot(st_geometry(watersheds))
+sub_watersheds <- st_intersection(watersheds, merged_shp)
+subwatersheds_17N <- st_transform(sub_watersheds, 31971)
+#plot(st_geometry(test))
+
+cond_1km <-raster("Data/Chapter5/Low_res_resistance_surface.tif")
+
+```
+
+```{r, eval=F, echo=F}
+test <- extract(cond_1km,subwatersheds_17N, fun=mean, na.rm=T)
+subwatersheds_17N$avg_cond <- test
+st_write(subwatersheds_17N, "Data/Chapter7/watershed_conductivity.shp" )
+```
+
+```{r, include=F}
+subwatersheds_17N<- st_read("Data/Chapter7/watershed_conductivity.shp")
+
+```
+
+
+```{r, echo=F}
+
+library(RColorBrewer)
+pal <- brewer.pal(7, "RdYlBu")
+
+plot(subwatersheds_17N["avg_cond"], breaks="quantile", nbreaks=7, pal=pal, main="")
+```
+
+## Future work
+The following elements are beyond the scope of this exercise, however we propose that they be addressed in the future:
+
+1) Create an "Index of Climate Isolation" - a single value which represents the degree of separation from high elevation protected areas for all protected areas. This is possible with circuitscape - and is a considerable improvement on the least cost path approach (which only provides a cost for the single path).
+
+2) We currently only consider coastal protected areas as start points. Future work should expand this to all low elevation protected areas. 
+
+3) Validation of current flows. This analysis assumes that the current flows calculated by circuitscape reflect animal movement flow, and we do not attempt to validate this assumption. It would be possible to validate these findings using camera traps of GPS collar locations, which would make the conclusions more robust. 
+
+4) Current flow models and LCP's do not account for terrain steepness, only habitat structure. If these models are to be applied to specific species (see above), ruggedness costs should be considered.
+
+5) The current analyses only include protected high elevation areas. This analysis should be repeated to include non-protected high elevation areas too.
+
+6) We currently do not account for how climates will change, rather we use elevation as a proxy for resilience. Future work could incorporate climate projections into the analyses.
+
+

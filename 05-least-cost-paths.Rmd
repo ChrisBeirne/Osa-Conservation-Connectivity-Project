@@ -1,0 +1,1487 @@
+
+```{r ch_5setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library("devtools")
+#install_github("achubaty/grainscape")
+#install_github("vqv/ggbiplot")
+
+library(grainscape)
+library(raster)
+library(ggplot2)
+library(ggpubr)
+library(stars)
+library(sf)
+library(leastcostpath)
+library(gdistance)
+library(kableExtra)
+library(igraph)
+library(nngeo)
+library(dplyr)
+library(leaflet)
+library(ggbiplot)
+
+# How many coastal protected areas
+library(beeswarm)
+library(MetBrewer)
+library(plotly)
+library(stats)
+library(MuMIn)
+
+
+# Import required data files
+
+merged_shp <- st_read("data/spatial/area_of_interest/aoi.shp")
+mangrove_large <- st_read("data/spatial/mangroves/mangrove_large_1kmsq.shp")
+high_pa <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp")
+roi_17N <- st_transform(merged_shp, crs=31971)
+# Read in the cost surface 
+
+cond_1km <- raster("Data/Chapter5/Low_res_resistance_surface.tif")
+cond_1km_stars <- read_stars("Data/Chapter5/Low_res_resistance_surface.tif")
+
+# Transform to 17N
+mangrove_17N <- st_transform(mangrove_large,31971)
+
+# Give the fragments a unique code
+mangrove_17N$ID <- paste0("MAN",sprintf("%04d", 1:nrow(mangrove_17N)))
+
+
+```
+
+
+# Least-cost paths {#lcp}
+
+In this chapter we use the 'least cost paths' (a.k.a. LCP) methodology defined in Chapter 3 to define the path of least resistance from all coastal protected areas (larger than 1km^2^) in the focal region to their corresponding high elevation protected area. For each protected area (Section 1) and mangrove (Section 2), we calculate the LCP for the 10 nearest (by euclidean distance) high elevation protected areas, then select the path with the least resistance. We then explore several important properties of these paths between different countries (e.g. path length, mean resistance, total resistance, quality of forest on the path), in order to understand the spatial state of low-to-high elevation connectivity in central America. Finally, we devise a prioritization scheme to select candidate locations for habitat restoration initiatives.
+
+It is important to note that the LCP method does not fully characterize connectivity in a probabilistic fashion, but it is a tool which cn give us simple information to design prioritization schemes. For a more complete consideration of connectivity, see the next chapter. 
+
+## 'End' Nodes
+
+We first start by defining a suite of end points (or nodes) - high elevation protected areas. To do this we import all of the high elevation protected area polygons defined in the data assembly section. As the LCP methods require points as targets, not polygons, we also randomly sample within the polygons to create a complete suite of "end nodes". This means that there are multiple end points within larger protected areas. 
+
+In the map below, all of the end points are shown as black points, and their corresponding protected area polygons in blue:   
+
+```{r ch5_1, echo=F, include=T, warning=F, message=F}
+
+high_pa_17N <- st_transform(high_pa,31971)
+
+#plot(cond_1km)
+#plot(st_geometry(high_pa_17N), add=T, col="black", border=NA)
+
+tmp <- projectRaster(cond_1km, crs = 4326)
+
+
+# Centroids of all shapes
+end_points <- st_centroid(high_pa_17N)
+#plot(st_geometry(end_points), add=T, pch=19, cex=0.5, col="blue")
+
+# Try adding in some other locations (to account for large polygons)
+set.seed(1200)
+test <- st_sample(high_pa_17N, 120, type = "hexagonal")
+
+#plot(st_geometry(test), add=T, pch=19, cex=0.5, col="blue")
+
+# Intersect to get the information back
+test <- st_intersection(high_pa_17N, test)
+
+end_points <- rbind(end_points, test)
+end_points_wgs<- st_transform(end_points, 4326)
+# I need to remove any that are too close
+#st_nn(end_points)
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  #addRasterImage(tmp, group="Raster") %>% 
+  addPolygons(data=high_pa, fillColor = "yellow",
+               label = high_pa$NAME, group="High_pa") %>% 
+  addCircleMarkers(data=end_points_wgs, col="black", radius=1) %>% 
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("High_pa"))
+  
+
+```
+
+In total, we have a suite (n = `r nrow(end_points)`) of end points for the analyses. For each protected area, we find the 10 closest of each of these end points (euclidian distance) and calculate the least cost paths to them.
+
+
+```{r ch5_2, eval=F, include=F,, warning=F, message=F}
+
+# There is potentially an issue with mangroves centroids falling outside the ghm
+tmp <- st_centroid(mangrove_17N)
+
+# Read in cost stars 
+# 
+# # How many centroids fall outside of the rasters
+# tmp2 <- st_extract(cond_1km_stars, tmp)
+# # 44... a.k.a. Too many
+# table(is.na(tmp2$Low_res_resistance_surface.tif))
+# 
+# # How many polgons dont overlap at all?
+# tmp <- extract(cond_1km, mangrove_17N)
+# check <- list()
+# i <- 1
+# for(i in 1:length(tmp))
+# {
+#   check[[i]] <- data.frame(row=i,mean= mean(tmp[[i]], na.rm=T))
+# }
+# check <- bind_rows(check)
+# table(is.na(check$mean))
+# 
+# # Gahh, some are still outside. Continue for now.
+# 
+# #Intersect the mangroves with the RAS
+# tmp <- cond_1km_stars
+# tmp[is.na(tmp)==F] <-1
+# 
+# # Convert to polygon
+# r.to.poly <- sf::st_as_sf(stars::st_as_stars(tmp), 
+#                             as_points = FALSE, merge = TRUE)
+# # Intersect with the mangroves
+# mangrove_reduced <- st_intersection(mangrove_17N, r.to.poly)
+
+
+cond_1km[is.na(cond_1km)==T] <- 0.0001
+#cond_1km[cond_1km==0] <- 1
+
+# I need a conducance layer for this analysis - just use the mean. Other functions are available. 
+cond_derived <- transition(cond_1km,function(x) mean(x), 8)
+
+
+res_mangrove <- list()
+res_shp <- list()
+i <- 160
+j <- 1
+for(i in 1:nrow(mangrove_17N))
+{
+  A <- as_Spatial(st_centroid(mangrove_17N[i,]))
+  # If it isnt on the mainland, break the loop
+  #tmp <- st_intersects(st_centroid(mangrove_17N[i,]), roi_17N, sparse=F)
+  #extract(cond_1km, A)
+    # Find 20 nearest neighbours
+    near_locs <- st_nn(mangrove_17N[i,], end_points, k=10)
+    near_locs <- near_locs[[1]]
+    
+   # Yep that works now 
+   #plot(st_geometry(roi_17N), col="lightgrey", border=F)
+   #plot(st_geometry(st_centroid(mangrove_17N[i,])), col="red", add=T)
+   #plot(st_geometry(end_points[near_locs,]), col="blue", add=T)
+    # Check this code works
+    
+    
+    
+    tmp_shp <- list()
+    tmp_frame <- data.frame("ID"=rep(mangrove_17N$ID[i], length(near_locs)), "endID"=NA, "length_km"=NA, "conductance"=NA)
+    for(j in 1:length(near_locs))     #nrow())
+    {
+      
+      B <- as_Spatial(end_points[near_locs[j],])
+      tmp_frame$endID[j] <- B$NAME
+      # Erase the previous
+      lc_path <-NULL
+      
+      #plot(cond_1km)
+      #plot(A, add=T)
+      #plot(B, add=T)
+      # I have conductance so I need : function(x) 1/mean(x)
+      
+      # Get the shortest path
+      lc_path <- gdistance::shortestPath(cond_derived, origin=A, 
+                                goal=B, output="SpatialLines")
+      #plot(lc_path, add=T)
+      # Need a break if this cannot run
+      tmp <- st_as_sf(lc_path)
+      if(nrow(st_coordinates(tmp$geometry))>2)
+         {
+            #plot(st_geometry(tmp))
+            #plot(cond_1km, add=T)
+            #plot(st_geometry(tmp), add=T, lwd=2)
+      
+            #plot(st_geometry(st_centroid(mangrove_17N[i,])), add=T, pch=19)
+            #plot(st_geometry(st_centroid(high_pa_17N[near_locs[j],])), add=T, pch=19, col="red")
+      
+            # Distance in km
+            tmp_frame$length_km[j] <- round(as.numeric(st_length(tmp))/1000,1)
+
+            # Condusctance units
+            tmp3 <- raster::extract(cond_1km, tmp)
+            #Remove 0.1's (effective 0's)
+            tmp3[[1]] <- tmp3[[1]][tmp3[[1]]!=0.0001]
+            tmp_frame$conductance[j] <- sum(tmp3[[1]], na.rm=T)
+            # Mean conductancer
+            tmp_frame$cond_min[j] <- min(tmp3[[1]], na.rm=T)
+            tmp_frame$cond_mean[j] <- mean(tmp3[[1]], na.rm=T)
+            tmp$ID <- mangrove_17N$ID[i]
+            tmp$endID <- tmp_frame$endID[j]
+            tmp_shp[[j]] <- tmp
+            
+            print(paste("mangrove", i, "- loop", j))
+        }
+    }
+    res_mangrove[[i]] <- tmp_frame
+    res_shp[[i]] <- tmp_shp
+  
+
+}
+
+res_mangrove <- bind_rows(res_mangrove)
+res_mangrove_shp <- bind_rows(res_shp)
+
+res_mangrove_shp
+
+# Add in names of the original mangroves - THEY DONT HAVE NAMES
+
+
+
+saveRDS(res_mangrove, "data/Chapter3/lcp_test/mangrove_to_protected_test.rds")
+saveRDS(res_mangrove_shp, "data/Chapter3/lcp_test/mangrove_to_protected_test_shp.rds")
+
+```
+
+
+```{r ch5_3, eval=F, include=F}
+# Import coastal protected areas
+terrestrial_pa <- st_read("data/spatial/protected_areas/Terrestrial_focal_areas.shp")
+
+terrestrial_17N <- st_transform(terrestrial_pa, 31971)
+head(terrestrial_17N)
+# Simplify the dataframe 
+terrestrial_17N <- terrestrial_17N[,c("NAME", "DESIG_E","DESIG_T", "sovrgnt", "geounit", "GIS_ARE")]
+
+
+# Give the fragments a unique code
+terrestrial_17N$ID <- paste0("TERR",sprintf("%04d", 1:nrow(terrestrial_17N)))
+head(terrestrial_17N)
+# cond_1km[is.na(cond_1km)==T] <- 0.0001
+# #cond_1km[cond_1km==0] <- 1
+# 
+# # I need a conducance layer for this analysis - just use the mean. Other functions are available. 
+# cond_derived <- transition(cond_1km,function(x) mean(x), 8)
+
+
+res_terrestrial <- list()
+res_shp <- list()
+i <- 1
+j <- 1
+for(i in 1:nrow(terrestrial_17N))
+{
+  A <- as_Spatial(st_centroid(terrestrial_17N[i,]))
+  # If it isnt on the mainland, break the loop
+  #tmp <- st_intersects(st_centroid(terrestrial_17N[i,]), roi_17N, sparse=F)
+  #extract(cond_1km, A)
+    # Find 20 nearest neighbours
+    near_locs <- st_nn(terrestrial_17N[i,], end_points, k=1)
+    near_locs <- near_locs[[1]]
+    
+   # Yep that works now 
+   #plot(st_geometry(roi_17N), col="lightgrey", border=F)
+   #plot(st_geometry(st_centroid(terrestrial_17N[i,])), col="red", add=T)
+   #plot(st_geometry(end_points[near_locs,]), col="blue", add=T)
+    # Check this code works
+    
+    
+    
+    tmp_shp <- list()
+    tmp_frame <- data.frame("ID"=rep(terrestrial_17N$ID[i], length(near_locs)), "endID"=NA, "length_km"=NA, "conductance"=NA)
+    for(j in 1:length(near_locs))     #nrow())
+    {
+      
+      B <- as_Spatial(end_points[near_locs[j],])
+      tmp_frame$endID[j] <- B$NAME
+      # Erase the previous
+      lc_path <-NULL
+      
+      #plot(cond_1km)
+      #plot(A, add=T)
+      #plot(B, add=T)
+      # I have conductance so I need : function(x) 1/mean(x)
+      
+      # Get the shortest path
+      lc_path <- gdistance::shortestPath(cond_derived, origin=A, 
+                                goal=B, output="SpatialLines")
+      #plot(lc_path, add=T)
+      # Need a break if this cannot run
+      tmp <- st_as_sf(lc_path)
+      if(nrow(st_coordinates(tmp$geometry))>2)
+         {
+            #plot(st_geometry(tmp))
+            #plot(cond_1km, add=T)
+            #plot(st_geometry(tmp), add=T, lwd=2)
+      
+            #plot(st_geometry(st_centroid(terrestrial_17N[i,])), add=T, pch=19)
+            #plot(st_geometry(st_centroid(high_pa_17N[near_locs[j],])), add=T, pch=19, col="red")
+      
+            # Distance in km
+            tmp_frame$length_km[j] <- round(as.numeric(st_length(tmp))/1000,1)
+
+            # Condusctance units
+            tmp3 <- raster::extract(cond_1km, tmp)
+            #Remove 0.1's (effective 0's)
+            tmp3[[1]] <- tmp3[[1]][tmp3[[1]]!=0.0001]
+            tmp_frame$conductance[j] <- sum(tmp3[[1]], na.rm=T)
+            # Mean conductancer
+            tmp_frame$cond_min[j] <- min(tmp3[[1]], na.rm=T)
+            tmp_frame$cond_mean[j] <- mean(tmp3[[1]], na.rm=T)
+            tmp$ID <- terrestrial_17N$ID[i]
+            tmp$endID <- tmp_frame$endID[j]
+            tmp_shp[[j]] <- tmp
+            
+            print(paste("terrestrial", i, "- loop", j))
+        }
+    }
+    res_terrestrial[[i]] <- tmp_frame
+    res_shp[[i]] <- tmp_shp
+  
+
+}
+
+res_terrestrial <- bind_rows(res_terrestrial)
+res_terrestrial_shp <- bind_rows(res_shp)
+
+res_terrestrial_shp
+
+# Add in names of the original terrestrials - THEY DONT HAVE NAMES
+
+saveRDS(res_terrestrial, "data/Chapter3/lcp_test/terrestrial_to_protected.rds")
+saveRDS(res_terrestrial_shp, "data/Chapter3/lcp_test/terrestrial_to_protected_shp.rds")
+
+# Return cond_1km to NA;s
+cond_1km[cond_1km==0.0001] <- NA 
+
+```
+
+
+```{r, include=F}
+# Setup the maps
+
+res_mangrove <- readRDS("data/Chapter3/lcp_test/mangrove_to_protected_test.rds")
+res_mangrove_shp <- readRDS("data/Chapter3/lcp_test/mangrove_to_protected_test_shp.rds")
+
+res_terrestrial <- readRDS("data/Chapter3/lcp_test/terrestrial_to_protected.rds")
+res_terrestrial_shp <- readRDS("data/Chapter3/lcp_test/terrestrial_to_protected_shp.rds")
+
+tmp_lcp   <- st_transform(res_mangrove_shp,4326)
+tmp_end   <- st_transform(end_points,4326)
+tmp_pa   <- st_transform(high_pa_17N,4326)
+```
+
+
+```{r ch5_4, echo=F, warning=F, include=F, eval=F}
+# SUBSET TO SHORTEST PATH
+
+
+#We can then simplify this plot, so that each mangrove goes to only the nearest protected area. 
+
+#head(res_mangrove)
+#head(res_shp)
+# For each mangrove, take the nearest protected area... BY HIGHEST CONDUCTANCE
+nearest_man <- list()
+nearest_man_shp <- list()
+i<- 1
+for(i in 1:length(unique(res_mangrove$ID)))
+{
+  tmp <- res_mangrove[res_mangrove$ID==unique(res_mangrove$ID)[i],]
+  tmp <- tmp[order(tmp$length_km),]
+  nearest_man[[i]] <- tmp[1,]
+  nearest_man_shp[[i]] <- res_mangrove_shp[res_mangrove_shp$ID==unique(res_mangrove$ID)[i] & res_mangrove_shp$endID==tmp[1,]$endID & round(as.numeric(st_length(res_mangrove_shp))/1000,1)==tmp$length_km[1],]
+}
+
+nearest_man <- bind_rows(nearest_man)
+nearest_man_shp <- bind_rows(nearest_man_shp)
+
+# Remove duplicates
+nearest_man_shp <- nearest_man_shp[duplicated(nearest_man_shp)==F,]
+nearest_man_shp <- nearest_man_shp[duplicated(nearest_man_shp$ID)==F,]
+
+
+plot(st_geometry(roi_17N), col="lightgrey", border=F)
+
+plot(st_geometry(nearest_man_shp), add=T)
+
+dir.create("data/Chapter3/lcp_results/")
+
+saveRDS(nearest_man, "data/Chapter3/lcp_results/LCP_nearest_mangrove_res.rds")
+saveRDS(nearest_man_shp, "data/Chapter3/lcp_results/LCP_nearest_mangrove_res_shp.rds")
+```
+
+
+```{r ch5_5, echo=F, warning=F, include=F, eval=F}
+
+# REPEAT FOR PROTECTED AREAS
+
+# For each mangrove, take the nearest protected area... BY HIGHEST CONDUCTANCE
+nearest_pa <- list()
+nearest_pa_shp <- list()
+i<- 1
+for(i in 1:length(unique(res_terrestrial$ID)))
+{
+  tmp <- res_terrestrial[res_terrestrial$ID==unique(res_terrestrial$ID)[i],]
+  tmp <- tmp[order(tmp$length_km),]
+  nearest_pa[[i]] <- tmp[1,]
+  nearest_pa_shp[[i]] <- res_terrestrial_shp[res_terrestrial_shp$ID==unique(res_terrestrial$ID)[i] & res_terrestrial_shp$endID==tmp[1,]$endID & round(as.numeric(st_length(res_terrestrial_shp))/1000,1)==tmp$length_km[1],]
+}
+
+nearest_pa <- bind_rows(nearest_pa)
+nearest_pa_shp <- bind_rows(nearest_pa_shp)
+
+# Remove duplicates
+nearest_pa_shp <- nearest_pa_shp[duplicated(nearest_pa_shp)==F,]
+nearest_pa_shp <- nearest_pa_shp[duplicated(nearest_pa_shp$ID)==F,]
+
+
+plot(st_geometry(roi_17N), col="lightgrey", border=F)
+
+plot(st_geometry(nearest_pa_shp), add=T)
+
+saveRDS(nearest_pa, "data/Chapter3/lcp_results/LCP_nearest_pa_res.rds")
+saveRDS(nearest_pa_shp, "data/Chapter3/lcp_results/LCP_nearest_pa_res_shp.rds")
+
+
+```
+
+```{r ch5_6, echo=FALSE}
+res_mangrove <- readRDS("data/Chapter3/lcp_results/LCP_nearest_mangrove_res.rds")
+res_mangrove_shp <- readRDS("data/Chapter3/lcp_results/LCP_nearest_mangrove_res_shp.rds")
+
+res_terrestrial <- readRDS("data/Chapter3/lcp_results/LCP_nearest_pa_res.rds")
+res_terrestrial_shp <- readRDS("data/Chapter3/lcp_results/LCP_nearest_pa_res_shp.rds")
+
+
+```
+
+
+```{r ch5_7, eval=F, echo=F, warning=F , message=F}
+## DATA ADDITIONS
+
+
+# Proportion protected and contiguous protected area size
+
+
+library(sf)
+focal_pa <- readRDS("data/spatial/WDPA_protected_areas/focal_area_pa_shp.RDS")
+
+#plot(st_geometry(focal_pa))
+#plot(st_geometry(focal_pa[focal_pa$DESIG_TYPE!="International",]))
+
+focal_pa_17N <- st_transform(focal_pa,crs(res_mangrove_shp))
+pa_ras <- st_rasterize(focal_pa_17N, template=cond_1km_stars, align=T)
+pa_ras[pa_ras>0] <- 1
+pa_ras[is.na(pa_ras)==T] <- 0
+plot(pa_ras)
+
+test <- st_contour(pa_ras,contour_lines=F, breaks=c(-0.5, 0.5,1.5))
+test <- test[test$GIS_AREA=="[0.5,1.5)",]
+plot(st_geometry(test))
+
+st_area(test)
+test <- st_cast(test, "POLYGON")
+test$UID <- 1:nrow(test)
+contigous_pa_area <- test
+
+contigous_pa_area$contig_area <- as.numeric(st_area(test)/(1000*1000))
+contigous_pa_area <- contigous_pa_area[, c("contig_area")]
+
+contigous_pa_area <- st_make_valid(contigous_pa_area)
+
+focal_pa_17N <- st_make_valid(focal_pa_17N)
+
+
+test <- st_join(focal_pa_17N, contigous_pa_area)
+test$geometry <- NULL
+test <- test[, c("ORIG_NAME", "contig_area")]
+head(test)
+test2<- test %>% group_by(ORIG_NAME) %>% summarise(sum=sum(contig_area), na.rm=T)
+
+write_stars(pa_ras,"data/Chapter3/lcp_results/contiguous_pa_raster.tif", overwrite=T)
+st_write(contigous_pa_area,"data/Chapter3/lcp_results/contigous_pa_area.shp", append=F)
+
+```
+
+
+```{r ch5_8, eval=F, echo=F}
+# Add biomass
+nasa_biomass <- read_stars("data/spatial/biomass/NASA_biomass_desnity_estimation.tif")
+biomass_17N <- st_transform(nasa_biomass,31971)
+
+write_stars(biomass_17N, "data/spatial/biomass/NASA_biomass_desnity_estimation_17N.tif" )
+#plot(biomass_17N)
+
+#write_stars(biomass_17N, "data/spatial/biomass/NASA_biomass_desnity_estimation_17N_1km.tif" )
+
+```
+
+
+```{r ch5_9, echo=F, eval=F}
+# Add proportion of forest
+
+gfc_2020 <- read_stars("data/spatial/gfc/global_forest_change_2020_v1_8.treecover2000.tif")
+gfc_17N <- st_warp(gfc_2020,cond_1km_stars)
+write_stars(gfc_17N,"data/spatial/gfc/global_forest_change_2020_v1_8.treecover2000_17N.tif")
+```
+
+
+```{r ch5_10, eval=F, echo=F}
+# Convert to 17N
+
+res_mangrove_17N <- st_transform(res_mangrove_shp, 31971) 
+res_terrestrial_17N <- st_transform(res_terrestrial_shp, 31971) 
+
+# Proportion protected
+pa_ras <- raster("data/Chapter3/lcp_results/contiguous_pa_raster.tif")
+res_mangrove$prop_protected <- NA
+res_terrestrial$prop_protected <- NA
+
+# Average forest cover
+gfc_17N<- read_stars("data/spatial/gfc/global_forest_change_2020_v1_8.treecover2000_17N.tif")
+gfc_17N <- as(gfc_17N, "Raster")
+res_mangrove$prop_forest <- NA
+res_terrestrial$prop_forest <- NA
+
+# Cross borders?
+#Import the country shape
+focal_shp <- st_read("data/spatial/area_of_interest/focal_countries.shp")
+focal_shp_17N <- st_transform(focal_shp, st_crs(res_mangrove_17N))
+
+res_mangrove$nCountries <- NA
+res_terrestrial$nCountries <- NA
+
+# I have changed the code so that some high elevation protected areas are filtered out (small ones)
+
+all_pa <- readRDS( "data/spatial/WDPA_protected_areas/focal_area_pa_shp.RDS")
+
+
+
+#Use the all protected area to fill out some of these stats
+
+# # Average biomass
+# # NOT WORKING
+# #bio_ras <- raster("data/spatial/biomass/NASA_biomass_desnity_estimation_17N.tif")
+# library(terra)
+# # load elevation coming with the terra pakage
+# r <- rast("data/spatial/gfc/global_forest_change_2020_v1_8.treecover2000_17N.tif")
+# plot(r)
+
+# End point area
+res_mangrove$end_area <- NA 
+res_terrestrial$end_area <- NA
+i <- 202
+for(i in 1:nrow(res_mangrove))
+{
+   tmp <- res_mangrove$ID[i]
+   tmp_shp <- res_mangrove_17N[res_mangrove_17N$ID==tmp,]
+   #mask(cond_1km_stars, tmp_shp, mean)
+   tmp_res <- raster::extract(pa_ras, tmp_shp)
+   
+   res_mangrove$prop_protected[i] <- round(mean(tmp_res[[1]], na.rm=T),2)
+   
+   tmp_res <- raster::extract(gfc_17N, tmp_shp)
+   res_mangrove$prop_forest[i] <- round(mean(tmp_res[[1]], na.rm=T),2)
+   
+   # TO deal with 0's
+   tmp3 <- focal_pa[focal_pa$NAME==res_mangrove$endID[i],]$GIS_AREA
+   if(length(tmp3)>0 & length(tmp3)<2)
+      {
+         res_mangrove$end_area[i] <- focal_pa[focal_pa$NAME==res_mangrove$endID[i],]$GIS_AREA
+      }
+   
+   # Intersection countries
+   tmp2 <- st_intersection(tmp_shp, focal_shp_17N)
+   res_mangrove$nCountries[i] <- length(unique(tmp2$name))
+   
+   print(i)
+}
+
+
+# Repeat for terrestrial
+
+i <- 1
+for(i in 1:nrow(res_terrestrial))
+{
+   tmp <- res_terrestrial$ID[i]
+   tmp_shp <- res_terrestrial_17N[res_terrestrial_17N$ID==tmp,]
+   #mask(cond_1km_stars, tmp_shp, mean)
+   tmp_res <- raster::extract(pa_ras, tmp_shp)
+   
+   res_terrestrial$prop_protected[i] <- round(mean(tmp_res[[1]], na.rm=T),2)
+   
+   tmp_res <- raster::extract(gfc_17N, tmp_shp)
+   res_terrestrial$prop_forest[i] <- round(mean(tmp_res[[1]], na.rm=T),2)
+   # TO deal with 0's
+   tmp3 <- focal_pa[focal_pa$NAME==res_terrestrial$endID[i],]$GIS_AREA
+   if(length(tmp3)>0)
+      {
+         res_terrestrial$end_area[i] <- focal_pa[focal_pa$NAME==res_terrestrial$endID[i],]$GIS_AREA
+      }
+         # Intersection countries
+  tmp2 <- st_intersection(tmp_shp, focal_shp_17N)
+   
+  res_terrestrial$nCountries[i] <- length(unique(tmp2$name))
+   
+   print(i)
+}
+
+
+head(res_mangrove)
+head(res_terrestrial)
+
+# Get the starting country
+tmp <- st_intersection(st_buffer(mangrove_17N,10000), focal_shp_17N)
+
+tmp <- tmp[duplicated(tmp$ID)==F,]
+tmp <- tmp[, c("ID", "AREA_KM2", "name")]
+tmp$geometry <- NULL
+colnames(tmp) <- c("ID", "start_area", "start_country")
+
+res_mangrove_final <- left_join(res_mangrove, tmp)
+
+# Get the starting country (parks)
+
+tmp <- terrestrial_17N[, c("ID","NAME","DESIG_E", "geounit", "GIS_ARE")]
+
+tmp$geometry <- NULL
+head(tmp)
+colnames(tmp) <- c("ID", "start_pa", "designation", "start_country", "start_area")
+
+res_terrestrial_final <- left_join(res_terrestrial, tmp)
+
+# Write final datasets
+saveRDS(res_terrestrial_final, "data/Chapter3/lcp_results/terrestrial_final_results.rds")
+saveRDS(res_mangrove_final, "data/Chapter3/lcp_results/mangrove_final_results.rds")
+
+```
+
+```{r ch5_12, echo=F}
+res_terrestrial_final <- readRDS("data/Chapter3/lcp_results/terrestrial_final_results.rds")
+res_mangrove_final    <- readRDS("data/Chapter3/lcp_results/mangrove_final_results.rds")
+
+```
+
+## Protected area climate corridors
+
+We used the package 'gDistance' and the function 'shortestPath' to define the least-cost path from coastal protected areas larger than 1km^2^ in size to the ten nearest high elevation protected areas. Note, we use starting points adjacent to the ocean to fully encapsulate the ridge-to-reef gradients. 
+
+The map below shows the shortest (by distance) path (back lines) for each of the coastal protected areas. The underlying raster layer shows the cost surface, with red areas being highly resistant to movement, and blue areas offering low resistance.  
+
+```{r ch5_11, echo=F, warning=F, message=F}
+
+tmp <- st_transform(res_terrestrial_shp, 4327)
+
+tmp2 <- res_terrestrial_final[, c("ID", "start_pa")]
+tmp <- left_join(tmp, tmp2)
+
+tmp_end   <- st_transform(end_points,4326)
+tmp_pa   <- st_transform(high_pa_17N,4326)
+
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addRasterImage(cond_1km, group="Raster") %>% 
+  addPolygons(data=tmp_pa, fillColor = "yellow",
+               label = tmp_pa$NAME, group="High_pa") %>% 
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Raster","High_pa")) %>%
+  addPolylines(data=tmp, weight = 2, color = "black",
+               label = tmp$start_pa) 
+
+```
+
+```{r, include=F, eval=F}
+st_write(tmp, "data/Chapter7/final_ter_lcps.shp", overwrite=T, append=F)
+```
+
+
+### Least-cost-path characteristics
+
+In the following section we explore a suite of characteristics which would make an area a "good" candidate for restoration to preserve low to high elevation connectivity. The categories are as follows:
+
+- **large starting area**: a sufficiently large starting area would ensure strong "supply" of animals, as larger areas have higher wildlife carrying capacities. 
+
+- **large end area**: a sufficiently large end location would ensure animals can actually persist in the location they arrive in again, as the carrying capacity for wildlife should be higher. 
+
+- **Short least cost path**: short paths will be cheaper to restore than long paths, both in terms of the amount of restoration required, but also in terms of the logistics of tree planting.
+
+- **Path which is already partially protected**: in theory, if a path is fully protected from the start to the end, it will not need any investment in restoration. This might occur if the low elevation areas and high elevation target are within the same protected area. If this is the case, the elevation corridor should be safe from future development. 
+
+- **Path is already of good quality**: it may be the case that the path travels through unprotected areas which are high quality forests, these paths would be a high priority for future conservation and resoration initatives. 
+
+-**Path which doesnt cross multiple administrative borders**: the more administrative boudaries (e.g. countries) a path traverses, the more logistically complex its protection and restoration will be. 
+
+In the following section, we compare the LCP characteristics between different countries to get a general understanding of the state of ridge-to-reef connectivity. 
+
+```{r ch5_13, echo=F, warning=F, message=F}
+# Setup the plots
+
+# remove parks < 1km2
+res_terrestrial_final <- res_terrestrial_final[res_terrestrial_final$start_area>1,]
+
+# Remove end locations without an area
+res_terrestrial_final <- res_terrestrial_final[res_terrestrial_final$start_area>1,]
+
+res_terrestrial_final$end_area[res_terrestrial_final$endID=="Complejo Volcánico San Cristóbal ? Casitas- Chonco"] <- 314
+
+
+# Add country colours
+key <- data.frame(start_country=levels(as.factor(res_terrestrial_final$start_country)),
+                  cols=met.brewer("Archambault", 7)[1:7])
+
+res_terrestrial_final <- left_join(res_terrestrial_final, key)
+
+```
+
+#### Number of coastal protected areas available
+
+Understanding how many different potential source populations there re per country can give an idea of where might be appropriate to start conservation initiatives. The barplot below shows the number of coastal protected areas (>1km^2^) by focal country. As you can see, Costa Rica has the largest number of coastal protected areas, followed by El Salvador then Panama. Belize has the least. 
+
+```{r ch5_14, echo=F}
+
+#barplot(table(res_terrestrial_final$start_country), col=met.brewer("Archambault")[1:7], las=1,
+#        cex.axis)
+
+tmp <- res_terrestrial_final %>% group_by(start_country) %>% summarise(n())
+
+
+fig <- plot_ly(
+
+              x = tmp$start_country,
+              y = tmp$`n()`,
+              type = "bar",
+              color = key$cols,showlegend = F
+)
+
+fig
+
+
+```
+
+#### Starting protected area size
+
+Not all coastal protected areas are equal however, and some have the potential be be quite small. The plot below shows the distribution of start point protected areas by country. 
+
+```{r ch5_15, echo=F}
+fig <- plot_ly(y =res_terrestrial_final$start_area,x=res_terrestrial_final$start_country, type = "box", boxpoints = "all", jitter = 0.3,
+
+        pointpos = -1.8, text=paste0("start:", res_terrestrial_final$start_pa, "   end:", res_terrestrial_final$endID),
+        hoverinfo="text",
+        color=res_terrestrial_final$cols,showlegend = F)
+fig <- layout(fig, yaxis = list(type = "log"))
+
+fig
+
+```
+
+On average, Nicaragua has the largest coastal protected areas. Excluding the marine protected areas, the most substantial are Darien (Panama) and the Río Plátano Biosphere Reserve in Honduras. 
+
+#### End protected area size
+
+Having large, protected, end point make the climate corridors more resilient to climate change. The graph below plots the area of end points by country. Panama's Darien and Costa Rica's La Amistad are the largest, high elevation, contiguous protected areas in central america. El Salvador, Guatemala and Belize lack large high elevation protected areas.  
+
+
+```{r ch5_16, echo=F}
+fig <- plot_ly(y =res_terrestrial_final$end_area,x=res_terrestrial_final$start_country, type = "box", boxpoints = "all", jitter = 0.6,
+
+        pointpos = -1.8, 
+        text=paste0("start:", res_terrestrial_final$start_pa, "   end:", res_terrestrial_final$endID),
+        hoverinfo="text",
+        color=res_terrestrial_final$cols,showlegend = F)
+fig <- layout(fig, yaxis = list(type = "log"))
+
+fig
+
+```
+
+#### Multinational connectivity
+
+The plot below shows the number of jurisdictional boundarys the climate corridors pass through. Most start and end within the same country (~1). The only exception is Belize, which has no high elevation protected areas of its own. Thus, the paths typically cross into a neighboring country.  
+
+```{r ch5_17, echo=F}
+tmp <- res_terrestrial_final %>% group_by(start_country) %>% summarise(prop=sum(nCountries)/n())
+
+fig <- plot_ly(
+
+              x = tmp$start_country,
+              y = tmp$`prop`,
+              type = "bar",
+              color = key$cols,showlegend = F
+)
+
+fig
+
+```
+
+#### Least cost path lengths
+
+Short climate corridors will cost less to restore and maintain, longer corridors may be highly logistically complicated. The graph below shows the average LCP length, from start to finish for each corridor. Given the lack of high elevation areas within its borders, Belize has the longest corridors. Costa Rica has, on average, the shortest although Guatemala, Honduras and Panama are similar. 
+
+```{r ch5_18, echo=F}
+fig <- plot_ly(y =res_terrestrial_final$length_km,x=res_terrestrial_final$start_country, 
+               type = "box", boxpoints = "all", jitter = 0.6,
+               pointpos = -1.8, 
+               text=paste0("start:", res_terrestrial_final$start_pa, "   end:", res_terrestrial_final$endID),
+               hoverinfo="text",
+              color=res_terrestrial_final$cols,showlegend = F)
+
+#fig <- layout(fig, yaxis = list(type = "log"))
+
+fig
+```
+
+#### Average conductance
+
+Paths we on average, less resistant to animal movement will be more effect as they should be easier to move through. The plot below shows the breakdown by country. Panama appears to be the least disturbed (most conductive) landscape, whereas the habitats in El Salvador, on average, traverse some highly unsuitable habitats.  
+
+```{r ch5_19, echo=F}
+fig <- plot_ly(y =res_terrestrial_final$cond_mean,x=res_terrestrial_final$start_country, type = "box", boxpoints = "all", jitter = 0.6,
+
+        pointpos = -1.8, 
+        text=paste0("start:", res_terrestrial_final$start_pa, "   end:", res_terrestrial_final$endID),
+        hoverinfo="text",
+        color=res_terrestrial_final$cols,showlegend = F)
+#fig <- layout(fig, yaxis = list(type = "log"))
+
+fig
+```
+
+#### Least-suitable habitat
+It may be the case that the utility of a corridor is defined by the worst habitat within it. For example, the habitat is so poor that animals may not traverse it. We explored the minimum conductance of each climate corridor across the landscapes in the plot below. As expected, El Salvador performed very poorly owing to the landscape being highly human modified. Panamas worst scores were typiucally better than the average scores of most other countries.  
+
+```{r ch5_20, echo=F}
+fig <- plot_ly(y =res_terrestrial_final$cond_min,x=res_terrestrial_final$start_country, type = "box", boxpoints = "all", jitter = 0.6,
+
+        pointpos = -1.8, 
+        text=paste0("start:", res_terrestrial_final$start_pa, "   end:", res_terrestrial_final$endID),
+        hoverinfo="text",
+        color=res_terrestrial_final$cols,showlegend = F)
+fig <- layout(fig, yaxis = list(type = "log"))
+
+fig
+```
+
+#### Proportion of the path which is already protected
+Understanding the proportion of these climate corridors which are fully protected can give insight into how resilient they are in the future. The plot below shows the proportion of each of the corridors designated as protected by country. Remarkably only 3 of the putative corridors are fully protected to date. These are corridors which terminate in Parque Nacional Cerro Hoya, Panama and Nombre de Dios, Honduras. Panama has several other corridors which are highly protected - including Darien and Reverendo Padre Jesús Héctor Gallego Herrera. Costa Rica's highest protected climate corridor terminates in the Area de Conservación Guanacaste. As expected, El Salvador, on average, has the least prtected climate corridors. Over 20 putative corrdiors have <10% protection.  
+
+```{r ch5_21, echo=F}
+fig <- plot_ly(y =res_terrestrial_final$prop_protected,x=res_terrestrial_final$start_country, type = "box", boxpoints = "all", jitter = 0.6,
+
+        pointpos = -1.8, 
+        text=paste0("start:", res_terrestrial_final$start_pa, "   end:", res_terrestrial_final$endID),
+        hoverinfo="text",
+        color=res_terrestrial_final$cols,showlegend = F)
+#fig <- layout(fig, yaxis = list(type = "log"))
+
+fig
+```
+
+#### Proportion of forest cover 
+
+Regardless of whether the climate corridors are protected or not, they may have a reasonable amount of forest cover. The plot below shows the average forest cover per climate corridor by country. Panama has the highest average climate corridor forest cover (~90%), followed by Nicaragua. As expected, El Salvador had the lowest average forest cover (~60%).
+
+```{r ch5_22, echo=F}
+fig <- plot_ly(y =res_terrestrial_final$prop_forest,x=res_terrestrial_final$start_country, type = "box", boxpoints = "all", jitter = 0.6,
+
+        pointpos = -1.8, 
+        text=paste0("start:", res_terrestrial_final$start_pa, "   end:", res_terrestrial_final$endID),
+        hoverinfo="text",
+        color=res_terrestrial_final$cols,showlegend = F)
+#fig <- layout(fig, yaxis = list(type = "log"))
+
+fig
+```
+
+### Multivariate corridor prioritization
+
+Given that there are multiple elements which must be balanced in order to prioritise locations for climate corridors (see above), one approach to integrating them is through the use of a principal component analysis (PCA). PCA'stake multiple input variables and decompose the correlated variation between them into "principal components" - which are essentially a mix of all the variables which load onto them. This allows users to simplify mutiple variables of interest into two or three interprtable axes. 
+
+Below, we perform this analysis on the characteristics provided above. Ccorridor length, start area, proportion forested, end area, average habitat conductance, and proportion of protected forest and their loading directions are shown as black lines, individual corridors are shown as points colored by their terminal country. 
+
+
+```{r ch_23, echo=F, message=F, warning=F}
+
+X <- res_terrestrial_final[,c("length_km","cond_mean", "cond_min", "prop_protected", "prop_forest", "end_area", "start_area")]
+
+X <- stdize(X, prefix=F)
+prin_comp <- prcomp(X, rank = 2)
+
+components <- prin_comp[["x"]]
+
+components <- data.frame(components)
+
+components <- cbind(components, res_terrestrial_final$start_country)
+
+components$PC2 <- -components$PC2
+
+explained_variance <- summary(prin_comp)[["sdev"]]
+
+explained_variance <- explained_variance[1:2]
+
+comp <- prin_comp[["rotation"]]
+
+comp[,'PC2'] <- - comp[,'PC2']
+
+loadings <- comp
+
+for (i in seq(explained_variance)){
+
+  loadings[,i] <- comp[,i] * explained_variance[i]
+
+}
+
+
+features = c("length_km","cond_mean", "cond_min", "prop_protected", "prop_forest", "end_area", "start_area")
+
+
+fig <- plot_ly(components, x = ~PC1, y = ~PC2, color = ~res_terrestrial_final$start_country, colors = key$cols, type = 'scatter', mode = 'markers',
+               text=paste0("start:", res_terrestrial_final$start_pa, "   end:", res_terrestrial_final$endID),
+        hoverinfo="text") %>%
+
+  layout(
+
+    legend=list(title=list(text='color')),
+
+    plot_bgcolor = "#FFFFFF",
+
+    xaxis = list(
+
+      title = "PCA 1"),
+
+    yaxis = list(
+
+      title = "PCA 2"))
+
+for (i in seq(length(features))){
+
+  fig <- fig %>%
+
+    add_segments(x = 0, xend = (loadings[i, 1])*4, y = 0, yend = (loadings[i, 2]*4), line = list(color = 'black'),inherit = FALSE, showlegend = FALSE) %>%
+
+    add_annotations(x=(loadings[i, 1]*4), y=(loadings[i, 2]*4), ax = 0, ay = 0,text = features[i], xanchor = 'center', yanchor= 'bottom')
+
+}
+
+fig
+
+#IF you want to check that we get the same results with conventional methods, see : 
+
+# head(res_terrestrial_final)
+# 
+# ter.pca <- prcomp(res_terrestrial_final[,c("length_km","cond_mean", "cond_min", "prop_protected", "prop_forest", "end_area", "start_area")], center = TRUE,scale. = TRUE)
+# 
+# #summary(ter.pca)
+# 
+# ggbiplot(ter.pca, groups=res_terrestrial_final$start_country)
+
+```
+
+The graph shows that axis 1 is principally associated with increasing starting area size, forest quality and proportions protected as you move fromn left to right. Axis two is principally associated with path length, with climate corridors increasing in length from bottom to top. 
+
+#### The 'sweet spot'
+
+A sweet spot exists in the above plot which represents climate corridors which: 
+
+  - are not fully protected, but also have some protection
+  - have large start and end locations
+  - are which are not to long
+  - are already situated in good habitat
+  
+These criteria all represent locations where climate corridor restoration initiatives would be suitable and, crucially, achievable. Using a green polygon below, we highlight the suite of corridor which fit this description:
+  
+```{r ch_24, echo=F, message=F, warning=F}
+
+# Add the pca components to the results dataframe
+res_terrestrial_final$PCA1 <- components$PC1
+res_terrestrial_final$PCA2 <- components$PC2
+
+
+plot(res_terrestrial_final$PCA1, res_terrestrial_final$PCA2, col=res_terrestrial_final$cols, pch=19)
+
+xlow <- 0.2
+xhigh <- 2.2
+ylow <- -1.1
+yhigh <- 0.6
+
+polygon(c(xlow,xlow,xhigh,xhigh),
+        c(ylow,yhigh,yhigh,ylow),
+        border=F, col=rgb(0,1,0,0.3))
+
+# Subset the corridors to just the ones highighted
+ter_finalists <- res_terrestrial_final[res_terrestrial_final$PCA1>xlow & res_terrestrial_final$PCA1 < xhigh & res_terrestrial_final$PCA2>ylow & res_terrestrial_final$PCA2 < yhigh,  ]
+
+
+```
+
+Below we plot these `r nrow(ter_finalists)` climate on a map to see if we can find a subset of wider landscapes which represent tartgets for climate corridor restoration. 
+
+```{r ch_24b, echo=F, message=F, warning=F, include=F}
+coastal_pa  <- st_read("data/spatial/protected_areas/Coastal_protected_areas.shp")
+
+```
+
+
+```{r ch_25, echo=F, message=F, warning=F}
+ter_finalists_shp <- res_terrestrial_shp[res_terrestrial_shp$ID %in% ter_finalists$ID,]
+ter_finalists_shp_wgs <- st_transform(ter_finalists_shp, 4327)
+ter_finalists_shp_wgs <- left_join(ter_finalists_shp_wgs, ter_finalists)
+
+tmp <- st_transform(res_terrestrial_shp, 4327)
+
+tmp2 <- res_terrestrial_final[, c("ID", "start_pa")]
+tmp <- left_join(tmp, tmp2)
+
+tmp_end   <- st_transform(end_points,4326)
+tmp_pa   <- st_transform(high_pa_17N,4326)
+
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addPolygons(data=tmp_pa, fillColor = "orange",
+               label = tmp_pa$NAME, group="High_pa", stroke=F) %>%
+  addPolygons(data=coastal_pa, fillColor = "blue",
+               label = coastal_pa$NAME, group="low_pa", stroke=F) %>% 
+  
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Raster","High_pa")) %>%
+  addPolylines(data=ter_finalists_shp_wgs, weight = 2, color = "black",
+               label = ter_finalists_shp_wgs$start_pa) 
+
+
+
+
+```
+
+```{r ch_25b, echo=F, message=F, warning=F, include=F}
+st_write(ter_finalists_shp_wgs, "data/Chapter7/PA_priority.shp", append=F)
+
+```
+
+### Conclusions
+As you can see form the obove map, the selected climate corridors are principally located in Panama, Costa Rica and Honduras. There is not much potential for restoration of climate corridors in El Salvador, and to a lesser extent Nicaragua, Guatamal and Belize. 
+
+The majority of corridors lie in and around La Amistad protected area, from both the Caribbean and Pacific directions, highlighting the importance of these regions. 
+
+Panama is relatively under represented as it already possess climate corridors with a cool percentage of protection and which contain good forest. These should be considered targets for preservation, not restoration per se. 
+
+
+## Mangrove climate corridors
+
+We now repeat this process for mangrove fragments, to see if there are locations where there may be co-benefits for mangroves and terrestrial protected areas: 
+
+The graph below shows the LCPs (black lines) for all mangroves larger than 1km^2^ in size to high elevation protected areas (blue polygons):   
+
+```{r ch5_26, echo=F, warning=F, message=F}
+tmp <- st_transform(res_mangrove_shp, 4327)
+
+
+tmp_end   <- st_transform(end_points,4326)
+tmp_pa   <- st_transform(high_pa_17N,4326)
+
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+ # addRasterImage(cond_1km, group="Raster") %>% 
+  addPolygons(data=tmp_pa, fillColor = "yellow",
+               label = tmp_pa$NAME, group="High_pa") %>% 
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("High_pa")) %>%
+  addPolylines(data=tmp, weight = 2, color = "black",
+               label = tmp$ID) 
+
+
+tmp <- st_transform(res_terrestrial_shp, 4327)
+
+tmp2 <- res_terrestrial_final[, c("ID", "start_pa")]
+tmp <- left_join(tmp, tmp2)
+
+tmp_end   <- st_transform(end_points,4326)
+tmp_pa   <- st_transform(high_pa_17N,4326)
+
+
+
+
+
+```
+
+### Country characteristics
+
+As above, we will summarize the linkage between mangrove and high elevation protected areas
+
+```{r ch5_27, echo=F, message=F, warning = F}
+# Setup the plots
+
+# Remove end locations without an area
+res_mangrove_final <- res_mangrove_final[res_mangrove_final$start_area>1,]
+
+
+res_mangrove_final$end_area[res_mangrove_final$endID=="Complejo Volcánico San Cristóbal ? Casitas- Chonco"] <- 314
+
+# Add country colours
+key <- data.frame(start_country=levels(as.factor(res_mangrove_final$start_country)),
+                 cols=met.brewer("Archambault", 7)[1:7])
+
+res_mangrove_final <- left_join(res_mangrove_final, key)
+
+
+
+
+```
+
+#### Number of mangroves fragments
+
+```{r ch5_28, echo=F,  message=F, warning = F}
+
+#barplot(table(res_mangrove_final$start_country), col=met.brewer("Archambault")[1:7], las=1,
+#        cex.axis)
+
+tmp <- res_mangrove_final %>% group_by(start_country) %>% summarise(n())
+
+
+fig <- plot_ly(
+
+              x = tmp$start_country,
+              y = tmp$`n()`,
+              type = "bar",
+              color = key$cols,showlegend = F
+)
+
+fig
+
+
+```
+
+#### Starting mangrove patch size
+Mangroves are typically small ~3km^2^, but they can be up to 130km^2^.
+
+```{r ch5_29, echo=F}
+fig <- plot_ly(y =res_mangrove_final$start_area,x=res_mangrove_final$start_country, type = "box", boxpoints = "all", jitter = 0.3,
+
+        pointpos = -1.8, text=paste0("start:", res_mangrove_final$ID, "   end:", res_mangrove_final$endID),
+        hoverinfo="text",
+        color=res_mangrove_final$cols,showlegend = F)
+fig <- layout(fig, yaxis = list(type = "log"))
+
+fig
+
+```
+
+#### End protected area size
+
+```{r ch5_30, echo=F}
+fig <- plot_ly(y =res_mangrove_final$end_area,x=res_mangrove_final$start_country, type = "box", boxpoints = "all", jitter = 0.6,
+
+        pointpos = -1.8, 
+        text=paste0("start:", res_mangrove_final$start_pa, "   end:", res_mangrove_final$endID),
+        hoverinfo="text",
+        color=res_mangrove_final$cols,showlegend = F)
+fig <- layout(fig, yaxis = list(type = "log"))
+
+fig
+
+```
+
+#### Multinational connectivity
+
+```{r ch5_31, echo=F}
+tmp <- res_mangrove_final %>% group_by(start_country) %>% summarise(prop=sum(nCountries)/n())
+
+fig <- plot_ly(
+
+              x = tmp$start_country,
+              y = tmp$`prop`,
+              type = "bar",
+              color = key$cols,showlegend = F
+)
+
+fig
+
+```
+
+#### Least cost path lengths
+
+Mangroves in Costa Rica have, on average, the shortest links to high elevation protected areas. Belize the longest. 
+
+
+```{r ch5_32, echo=F}
+fig <- plot_ly(y =res_mangrove_final$length_km,x=res_mangrove_final$start_country, 
+               type = "box", boxpoints = "all", jitter = 0.6,
+               pointpos = -1.8, 
+               text=paste0("start:", res_mangrove_final$start_pa, "   end:", res_mangrove_final$endID),
+               hoverinfo="text",
+              color=res_mangrove_final$cols,showlegend = F)
+
+#fig <- layout(fig, yaxis = list(type = "log"))
+
+fig
+```
+
+#### Average conductance
+
+What is the range in average conductances? Remember, higher = better.  
+
+```{r ch5_33, echo=F}
+fig <- plot_ly(y =res_mangrove_final$cond_mean,x=res_mangrove_final$start_country, type = "box", boxpoints = "all", jitter = 0.6,
+
+        pointpos = -1.8, 
+        text=paste0("start:", res_mangrove_final$start_pa, "   end:", res_mangrove_final$endID),
+        hoverinfo="text",
+        color=res_mangrove_final$cols,showlegend = F)
+#fig <- layout(fig, yaxis = list(type = "log"))
+
+fig
+```
+
+El salvador and Guatemala in the worst shape. Least spread in Costa Rica. 
+
+#### Least-suitable habitat
+How about the worst habitat (lowest conductance) for each path?
+
+```{r ch5_34, echo=F}
+fig <- plot_ly(y =res_mangrove_final$cond_min,x=res_mangrove_final$start_country, type = "box", boxpoints = "all", jitter = 0.6,
+
+        pointpos = -1.8, 
+        text=paste0("start:", res_mangrove_final$start_pa, "   end:", res_mangrove_final$endID),
+        hoverinfo="text",
+        color=res_mangrove_final$cols,showlegend = F)
+fig <- layout(fig, yaxis = list(type = "log"))
+
+fig
+```
+
+#### Proportion of the path which is already protected
+How much of each least cost path is protected?
+
+```{r ch5_35, echo=F}
+fig <- plot_ly(y =res_mangrove_final$prop_protected,x=res_mangrove_final$start_country, type = "box", boxpoints = "all", jitter = 0.6,
+
+        pointpos = -1.8, 
+        text=paste0("start:", res_mangrove_final$start_pa, "   end:", res_mangrove_final$endID),
+        hoverinfo="text",
+        color=res_mangrove_final$cols,showlegend = F)
+#fig <- layout(fig, yaxis = list(type = "log"))
+
+fig
+```
+
+#### Proportion of forest cover 
+
+```{r ch5_36, echo=F}
+fig <- plot_ly(y =res_mangrove_final$prop_forest,x=res_mangrove_final$start_country, type = "box", boxpoints = "all", jitter = 0.6,
+
+        pointpos = -1.8, 
+        text=paste0("start:", res_mangrove_final$start_pa, "   end:", res_mangrove_final$endID),
+        hoverinfo="text",
+        color=res_mangrove_final$cols,showlegend = F)
+#fig <- layout(fig, yaxis = list(type = "log"))
+
+fig
+```
+
+### Multivariate summary
+
+As before (see above), we implement a PCA to reduce the suite of important characteristics into two principal axes of variation.
+
+```{r ch_37, echo=F, message=F, warning=F}
+
+X <- res_mangrove_final[,c("length_km","cond_mean", "cond_min", "prop_protected", "prop_forest", "end_area", "start_area")]
+
+X <- stdize(X, prefix=F)
+X$end_area[is.na(X$end_area)==T] <- 0
+
+
+prin_comp <- prcomp(X, rank = 2)
+
+components <- prin_comp[["x"]]
+
+components <- data.frame(components)
+
+components <- cbind(components, res_mangrove_final$start_country)
+
+components$PC2 <- -components$PC2
+
+explained_variance <- summary(prin_comp)[["sdev"]]
+
+explained_variance <- explained_variance[1:2]
+
+comp <- prin_comp[["rotation"]]
+
+comp[,'PC2'] <- - comp[,'PC2']
+
+loadings <- comp
+
+for (i in seq(explained_variance)){
+
+  loadings[,i] <- comp[,i] * explained_variance[i]
+
+}
+
+
+features = c("length_km","cond_mean", "cond_min", "prop_protected", "prop_forest", "end_area", "start_area")
+
+
+fig <- plot_ly(components, x = ~PC1, y = ~PC2, color = ~res_mangrove_final$start_country, colors = key$cols, type = 'scatter', mode = 'markers',
+               text=paste0("start:", res_mangrove_final$start_pa, "   end:", res_mangrove_final$endID),
+        hoverinfo="text") %>%
+
+  layout(
+
+    legend=list(title=list(text='color')),
+
+    plot_bgcolor = "#FFFFFF",
+
+    xaxis = list(
+
+      title = "PCA 1"),
+
+    yaxis = list(
+
+      title = "PCA 2"))
+
+for (i in seq(length(features))){
+
+  fig <- fig %>%
+
+    add_segments(x = 0, xend = (loadings[i, 1])*4, y = 0, yend = (loadings[i, 2]*4), line = list(color = 'black'),inherit = FALSE, showlegend = FALSE) %>%
+
+    add_annotations(x=(loadings[i, 1]*4), y=(loadings[i, 2]*4), ax = 0, ay = 0,text = features[i], xanchor = 'center', yanchor= 'bottom')
+
+}
+
+fig
+
+#If you want to check that we get the same results with conventional methods, see : 
+
+# head(res_mangrove_final)
+# 
+# ter.pca <- prcomp(res_mangrove_final[,c("length_km","cond_mean", "cond_min", "prop_protected", "prop_forest", "end_area", "start_area")], center = TRUE,scale. = TRUE)
+# 
+# #summary(ter.pca)
+# 
+# ggbiplot(ter.pca, groups=res_mangrove_final$start_country)
+
+```
+
+#### The 'sweet spot'
+
+A sweet spot should exist in the above plot: 
+
+  - paths which are not fully protected, but also have some protection
+  - paths with large start and end locations
+  - paths which are not to long
+  - paths already situation in good habitat
+  
+```{r ch_38, echo=F, message=F, warning=F}
+
+# Add the pca components to the results dataframe
+res_mangrove_final$PCA1 <- components$PC1
+res_mangrove_final$PCA2 <- components$PC2
+
+
+plot(res_mangrove_final$PCA1, res_mangrove_final$PCA2, col=res_mangrove_final$cols, pch=19)
+abline(h=0, lty=2)
+abline(v=0, lty=2)
+
+xlow <- 0
+xhigh <- 2.2
+ylow <- -2.5
+yhigh <- 1.5
+
+polygon(c(xlow,xlow,xhigh,xhigh),
+        c(ylow,yhigh,yhigh,ylow),
+        border=F, col=rgb(0,1,0,0.3))
+
+# Subset the corridors to just the ones highighted
+man_finalists <- res_mangrove_final[res_mangrove_final$PCA1>xlow & res_mangrove_final$PCA1 < xhigh & res_mangrove_final$PCA2>ylow & res_mangrove_final$PCA2 < yhigh,  ]
+
+```
+
+Lets plot these areas `r nrow(man_finalists)` on a map a see if we can identify 10 reasonable candidates areas for restoration:
+
+
+```{r, include=F, message=F, warning=F}
+#isolate the sf message
+coastal_pa  <- st_read("data/spatial/protected_areas/Coastal_protected_areas.shp")
+```
+
+```{r ch_39, echo=F, message=F, warning=F}
+man_finalists_shp <- res_mangrove_shp[res_mangrove_shp$ID %in% man_finalists$ID,]
+man_finalists_shp_wgs <- st_transform(man_finalists_shp, 4327)
+man_finalists_shp_wgs <- left_join(man_finalists_shp_wgs, man_finalists)
+
+tmp <- st_transform(res_mangrove_shp, 4327)
+
+#tmp2 <- res_mangrove_final[, c("ID", "start_pa")]
+#tmp <- left_join(tmp, tmp2)
+
+tmp_end   <- st_transform(end_points,4326)
+tmp_pa   <- st_transform(high_pa_17N,4326)
+
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addPolygons(data=tmp_pa, fillColor = "orange",
+               label = tmp_pa$NAME, group="High_pa", stroke=F) %>%
+  addPolygons(data=coastal_pa, fillColor = "blue",
+               label = coastal_pa$NAME, group="low_pa", stroke=F) %>% 
+  
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Raster","High_pa")) %>%
+  addPolylines(data=man_finalists_shp_wgs, weight = 2, color = "black",
+               label = man_finalists_shp_wgs$start_pa) 
+
+
+
+```
+
+```{r ch_39b, echo=F, message=F, warning=F, include=F}
+
+# Write the priority sites
+
+
+st_write(man_finalists_shp_wgs, "data/Chapter7/Mangrove_priority.shp", append=F)
+
+
+```
+
+## Comparing protected area and mangrove climate corridors
+Areas where climate corridors for mangroves and protected areas overlap will provide co-benefits for habitat restoration and may help in the prioritization process. Below we map both sets of putative corridors, protected areas = "red" and Mangroves = "blue", to determine if there is any evidence for overlap:
+
+```{r ch_40, echo=F, message=F, warning=F}
+
+
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+#  addPolygons(data=tmp_pa, fillColor = "orange",
+#               label = tmp_pa$NAME, group="High_pa", stroke=F) %>%
+#  addPolygons(data=coastal_pa, fillColor = "blue",
+ #              label = coastal_pa$NAME, group="low_pa", stroke=F) %>% 
+  
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("High_pa")) %>%
+  addPolylines(data=man_finalists_shp_wgs, weight = 2, color = "blue",
+               label = man_finalists_shp_wgs$start_pa) %>%
+  addPolylines(data=ter_finalists_shp_wgs, weight = 2, color = "red",
+               label = man_finalists_shp_wgs$start_pa) 
+
+
+
+```
+
+## Case study regions
+Below we highlight the regions selected for the high resolution case studies in the following chapter. 
+
+```{r ch_1a, echo=F, message=F, warning=F}
+knitr::include_graphics("data/images/priorities.PNG")
+```
+
+
+

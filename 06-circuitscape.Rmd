@@ -1,0 +1,3559 @@
+
+# Circuitscape {#circuitscape}
+In this chapter we use 'Circuitscape', a package built on the concepts of circuit theory, in order to explore patterns in connectivity between lowland protected areas and high elevation habitats. In contrast to the previous 'least cost paths' chapter, Circuitscape allows us to build probabilistic maps of habitat connectivity which account for the wider landscape context, rather than simply "the best route" to a given destination.
+
+There are two import considerations when applying the Circuitscape approach:
+
+- Given that the the surrounding landscape context is taken into account in the calculations, the issue of scale is very important: a coarse resolution map can give a very different result to a high resolution map
+
+- High resolution maps take a huge amount of computational effort, and thus it is not possible to create a high resolution map of the whole study area.
+
+To account for these two issues we perform the analysis at two different spatial scales. Firstly, at a coarse scale encompassing the whole study area. Then secondly, we zoom into specific locations identified as important in the least cost paths chapter to give high resolution information of the state of ridge-to-reef connectivity, and the potential for climate corridors.  
+
+
+## Methods
+The Circuitscape models are implemented in Julia, a platform which can process spatial data much more efficiently than R or Python. The input files are rasters, which in simple terms are three matrices of values which reflect the source points (and the electrical charge you are applying to them), destination points (and the strength of their draw) and the resistance surface (the degree to which each cell inhibits or promotes movement of charge).
+
+In our scenario the "sources" are the low elevation protected areas, the destination points are the high elevation protected areas, and the resistance surfaces are the quality of habitats between them. 
+
+We can then measure connectivity in two ways:
+
+1) from the pattern of electrical current flow (i.e., animal movement probabilities) across the resistance-to-movement surface. This is the way we explore the data in this report. 
+
+2) from the effective resistance of the circuit, measuring the degree to which the source node is isolated from the ground node. This is what is analysed in the second section. The 'effective resistance' represents a novel index which we have developed - the "Climate Resilience Index" - essentially a quantitative measure of how isolated protected areas are from future climate refugia.    
+
+
+```{r, message=F, warning=F, echo=F, eval=T, include=F}
+# Installed Julia according to these instructions
+
+
+# https://docs.circuitscape.org/Circuitscape.jl/latest/
+# https://www.mdpi.com/2073-445X/10/3/301/htm
+
+
+# The descriptions in omniscape seem much better
+
+# https://docs.circuitscape.org/Omniscape.jl/dev/usage/
+
+library(stars)
+library(sf)
+library(raster)
+library(leaflet)
+library(terra)
+
+merged_shp <- st_read("data/spatial/area_of_interest/aoi.shp")
+roi_17N <- st_transform(merged_shp, crs=31971)
+high_pa <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp")
+simple_cost <- read_stars("Data/Chapter5/Low_res_resistance_surface.tif")
+simple_cost_terra <- rast("Data/Chapter5/Low_res_resistance_surface.tif")
+
+# Make a new folder for the synthesis chapter 7
+dir.create("data/Chapter7")
+
+lc_key <- read.csv("data/spatial/landcover/ESACCI-LC_S2_Prototype_ColorLegend.csv", header=T, sep=";")
+lc_key$rgb <- rgb(lc_key$R/256,lc_key$G/256,lc_key$B/256)
+# Remove no data
+lc_key <- lc_key[1:11,]
+# Simplify labels
+lc_key$LCCOwnLabel[lc_key$LCCOwnLabel=="Tree cover areas"] <- "Tree cover"
+lc_key$LCCOwnLabel[lc_key$LCCOwnLabel=="Shrubs cover areas"] <- "Shrub cover"
+lc_key$LCCOwnLabel[lc_key$LCCOwnLabel=="Vegetation aquatic or regularly flooded"] <- "Flooded vegetation"
+
+
+
+```
+
+## Electrical current flow (a.k.a. animal movement)
+
+### Coarse scale (1km)
+
+#### Current proportional to protected area size
+For our first analysis, we apply a charge relative to the size of each of the lowland protected areas - the larger the protected area the higher the electrical current applied. Current is free to move to any of the high elevation protected areas within the landscape. 
+
+Isolated, small lowland protected areas will only contribute small amounts of charge. Large interconnected protected areas with contribute large amounts of charge. 
+
+Below is the output from this analysis across the whole survey area. The colors denote the magnitude of current flow: blue = low current flow, yellow = high current flow. The black polygons represent the destination high elevation protected areas. 
+
+```{r, eval=F, echo=F, message=F, include=F}
+
+# Import start polygons
+coastal_pa <- st_read("data/spatial/protected_areas/Coastal_protected_areas.shp")
+plot(st_geometry(coastal_pa))
+nrow(coastal_pa)
+length(unique(coastal_pa$NAME))
+plot(st_geometry(merged_shp), col=rgb(0,0,0,0.2), add=T)
+
+
+# Remove the aquatic areas - to stop them contributing current
+coastal_pa_filtered <- st_intersection(coastal_pa, merged_shp)
+plot(st_geometry(coastal_pa_filtered), col="red", add=T)
+nrow(test)
+length(unique(coastal_pa_filtered$NAME))
+# Check the areas
+coastal_pa_filtered$land_size <- as.numeric(st_area(coastal_pa_filtered)/(1000*1000))
+# Remove protected areas < 1km in size
+coastal_pa_filtered <- coastal_pa_filtered[coastal_pa_filtered$land_size>1,]
+
+# Remove the frontier corridor
+coastal_pa_filtered <- coastal_pa_filtered[coastal_pa_filtered$NAME!="Corredor Fronterizo",]
+
+# Transform to 17N
+start_poly_17N <- st_transform(coastal_pa_filtered, 31971)
+
+# starting parks
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addPolygons(data=coastal_pa_filtered, fillColor = "yellow",
+               label = coastal_pa_filtered$NAME, group="starting_points") %>%
+  #addPolygons(data=coastal_pa, fillColor = "red",
+  #             label = coastal_pa$NAME, group="unfiltered") %>%
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("starting_points", "unfiltered"))
+  
+
+
+# Create folders to store the results
+dir.create("Data/Chapter6/Coastal_pa_all_low_res")
+path_text <- "Data/Chapter6/Coastal_pa_all_low_res"
+
+# Import the costa layer
+simple_cost <- read_stars("Data/Chapter5/Low_res_resistance_surface.tif")
+plot(simple_cost)
+
+# Start points
+start_point <- st_point_on_surface(coastal_pa_filtered)
+start_point_17N <- st_transform(start_point, 31971)
+
+# Read in the final destinations
+end_poly <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp")
+end_poly_17N <- st_transform(end_poly, 31971)
+# Split into individual polygons
+end_poly_17N_filtered <- st_cast(end_poly_17N,"POLYGON")
+# Add new area
+end_poly_17N_filtered$fragArea <- as.numeric(st_area(end_poly_17N_filtered)/(1000*1000))
+
+# Remove small fragments
+end_poly_17N_filtered <- end_poly_17N_filtered[end_poly_17N_filtered$fragArea>=1,]
+nrow(end_poly_17N_filtered)
+# End points
+end_point <- st_point_on_surface(end_poly_17N_filtered)
+end_point_17N <- st_point_on_surface(end_poly_17N_filtered)
+nrow(end_point_17N)
+
+##############
+cellmap <- raster("Data/Chapter5/Low_res_resistance_surface.tif")
+
+NAvalue(cellmap) <- -9999
+plot(cellmap)
+writeRaster(cellmap, paste0(path_text,"/cellmap.asc"), overwrite=T)
+
+#############
+## Starting layers (terrestrial protected areas)
+#start_blocks <- st_intersection(terrestrial_node_17N, aoi_test) 
+start_blocks <- start_poly_17N
+
+plot(st_geometry(start_blocks), add=T, col="black")
+
+  # Read in a stars object to use as a template
+  tmp <- read_stars("Data/Chapter5/Low_res_resistance_surface.tif")
+
+  # Assign an id to the polygons
+  start_blocks$node <- 1:nrow(start_blocks)
+  start_blocks <- start_blocks[, c("node"),]
+
+  start_polygons <- st_rasterize(start_blocks, template=tmp, align=T)
+  plot(start_polygons) 
+
+  # Assign the starting current points
+  # Make the polygon area the current applied
+  start_point_17N$land_size <- round(start_point_17N$land_size)
+  start_point_17N$current <- start_point_17N$land_size
+  # Buffered sources
+  #sources<- st_rasterize(st_buffer(start_point_17N[,c("current")],1000), template=tmp, align=T)
+  
+  sources<- st_rasterize(start_point_17N[,c("current")], template=tmp, align=T)
+  
+  #plot(st_centroid(start_blocks))
+  plot(sources)
+
+## End layers (high elevation protected areas)
+  #end_blocks <- st_intersection(high_pa_17N, aoi_test) 
+  end_blocks <- end_poly_17N_filtered
+  nrow(end_blocks)
+  # Assign an ID to the end nodes
+  end_blocks$node<- (9999-(1:nrow(end_blocks)))
+  end_blocks <- end_blocks[, c("node")]
+  nrow(end_blocks)
+  length(unique(end_blocks$node))
+  #plot(st_geometry(end_blocks), add=T, col="red")
+  end_polygons <- st_rasterize(end_blocks, template=tmp, align=T)
+  
+  plot(end_polygons)
+
+## Add the resistance to the terminal location
+   
+   grounds<- st_rasterize(end_point_17N[,"NAME"], template=tmp, align=T)
+   grounds[grounds>0] <- 1  
+  
+plot(st_as_sfc(st_bbox(cellmap)))
+plot(st_as_sfc(st_bbox(start_polygons)), col=rgb(0,1,0,0.2), add=T)
+plot(st_as_sfc(st_bbox(end_polygons)), col=rgb(1,0,0,0.2), add=T)
+plot(st_as_sfc(st_bbox(sources)), col=rgb(0,0,1,0.2), add=T)
+plot(st_as_sfc(st_bbox(grounds)), col=rgb(0,0,1,0.2), add=T)
+
+# Address this issue when they are reimported as rasters
+
+write_stars(start_polygons,paste0(path_text,"/start_poly_stars.tif" ))
+write_stars(end_polygons, paste0(path_text,"/end_poly_stars.tif" ))
+write_stars(sources,paste0(path_text,"/sources_stars.tif" ))
+write_stars(grounds,paste0(path_text,"/grounds_stars.tif" ))
+
+# read them back in with the raster package
+start_polygons <- raster(paste0(path_text,"/start_poly_stars.tif"))
+end_polygons <- raster(paste0(path_text,"/end_poly_stars.tif"))
+sources_polygons <- raster(paste0(path_text,"/sources_stars.tif"))
+grounds_polygons <- raster(paste0(path_text,"/grounds_stars.tif"))
+
+length(unique(end_polygons[end_polygons>0]))
+length(grounds_polygons[grounds_polygons>0])
+
+
+# Match resolutions with the cost surface (cellmap)
+plot(cellmap)
+plot(start_polygons, add=T, col="black")
+plot(grounds_polygons, add=T, col="blue")
+plot(sources_polygons, add=T, col="red")
+
+start_final     <- extend(start_polygons, cellmap)
+end_final       <- extend(end_polygons, cellmap)
+sources_final   <- extend(sources_polygons, cellmap)
+grounds_final   <- extend(grounds_polygons, cellmap)
+
+
+extent(cellmap)
+extent(start_final)
+extent(grounds_final)
+extent(end_final)
+extent(sources_final)
+
+# Sources is too small
+sources_final <- crop(sources_final, cellmap)
+start_final <- crop(start_final, cellmap)
+grounds_final <- crop(grounds_final, cellmap)
+
+# Before add them... na's must be 0's
+start_final[is.na(start_final)==T] <- 0
+end_final[is.na(end_final)==T] <- 0
+
+# Using start polys
+#regions_grid_final  <- end_final+start_final
+
+# Start points
+regions_grid_final  <- end_final
+
+
+# Return them to NA';'s
+regions_grid_final[regions_grid_final==0] <- NA
+plot(regions_grid_final, col="black")
+regions_grid_final <- extend(regions_grid_final, cellmap)
+
+extent(cellmap)
+extent(regions_grid_final)
+plot(regions_grid_final)
+
+# Final check
+
+plot(st_as_sfc(st_bbox(cellmap)))
+plot(st_as_sfc(st_bbox(start_final)), col=rgb(0,1,0,0.2), add=T)
+plot(st_as_sfc(st_bbox(grounds_final)), col=rgb(1,0,0,0.2), add=T)
+plot(st_as_sfc(st_bbox(end_final)), col=rgb(0,0,1,0.2), add=T)
+plot(st_as_sfc(st_bbox(sources_final)), col=rgb(0,1,1,0.2), add=T)
+
+# Check lengths
+# Source
+sources_final[sources_final>0]
+length(sources_final[sources_final>0])
+# Grounds 
+grounds_final[grounds_final>0]
+length(grounds_final[grounds_final>0])
+
+length(unique(end_final[end_final>0]))
+
+# This way is more reobust to manipulating resistances
+
+writeRaster(regions_grid_final, paste0(path_text,"/regions_grid.asc"), overwrite=T)
+writeRaster(sources_final, paste0(path_text,"/sources.asc"), overwrite=T)
+writeRaster(grounds_final, paste0(path_text,"/grounds.asc"), overwrite=T)
+
+
+dir.create(paste0(path_text,"/output"))
+
+# COPY OVER YOUR INI FILE MANUALLY
+
+# Also do a normalise version -> starting current in irrespective of areas
+sources_normal <- sources_final
+sources_normal[sources_normal>0] <- 1
+
+sources_normal[sources_normal>0]
+plot(sources_normal)
+
+
+writeRaster(sources_normal, paste0(path_text,"/sources_normalised.asc"), overwrite=T)
+
+```
+
+```{r, echo=F, message=F, warning=F, include=F}
+# Plot the result
+res_cur <- rast("data/Chapter6/Coastal_pa_all_low_res/output/pas_lowres_curmap.asc")
+# GIve it the crs
+terra::crs(res_cur) <- "EPSG:31971"
+
+res_volt <- rast("data/Chapter6/Coastal_pa_all_low_res/output/pas_lowres_voltmap.asc")
+
+end_poly <- vect("data/spatial/area_of_interest/high_elevation_pas.shp")
+end_poly_17N <- project(end_poly, "EPSG:31971")
+
+
+# Raw current
+#plot(res_cur)
+res_clamp <- clamp(res_cur, upper=80)
+# Make low current NA
+res_clamp <- app(res_clamp, fun=function(x){ x[x < 0.1] <- NA; return(x)} )
+
+# Masked current (no sources)
+res_clamp <- mask(res_clamp, end_poly_17N, inverse=T)
+
+# Check before convery to raster
+#plot(res_clamp)
+#plot(st_geometry(roi_17N), add=T)
+
+pa_cond_final <- as(res_clamp, "Raster")
+
+# Reimport start and ends
+end_sf <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp")
+end_sf_17N <- st_transform(end_sf, 31971)
+# pdf("data/images/pa_cur_low.pdf",height=6.5, width=8)
+# plot(res_clamp)
+# plot(st_geometry(roi_17N), add=T)
+# plot(st_geometry(end_poly_17N), add=T, col="black")
+# dev.off()
+
+
+writeRaster(pa_cond_final, "data/Chapter7/Conductivity_pa_high_100m_res.tif", overwrite=T)
+```
+
+
+```{r, echo=F, message=F, warning=F}
+# Define a palette
+pal <- colorNumeric(c("#0C2C84", "#41B6C4", "#FFFFCC"), values(pa_cond_final),
+  na.color = "transparent")
+
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addRasterImage(pa_cond_final, group="Raster", colors = pal) %>% 
+  addPolygons(data=end_sf, fillColor = "black",
+               label = end_sf$NAME, group="High_pa", stroke=F, fillOpacity = 1) %>% 
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Raster","High_pa")) %>%
+  addLegend(pal = pal, values = values(pa_cond_final),
+    title = "Current flow")      #%>%
+  #addPolylines(data=tmp_lcp, weight = 2, fillColor = "blue",
+   #            label = tmp_lcp$ID)# %>% 
+  #addCircleMarkers(data=tmp_end, col="black", radius=1)
+
+
+```
+
+
+The map reveals several key conclusions:
+
+i) The Caribbean coast his a much higher degree of current flow (connectivity) than the pacific coast. This is unsurprising as the protected areas on the Caribbean coast are typically larger, and less disturbed than on the Pacific coast (refer to the human modification maps and protected areas maps in Chapter 2.
+
+ii) Not only is the absolute magnitude of current flow higher on the Caribbean coast, it is also less constrained - there are more available routes to animals and on the Pacific Coast. Contrast those patterns to the north west of the map in El Salvador and Guatemala - all of the charge is being funneled through one narrow corridor. This represents a bottleneck in animal movement. 
+
+iii) The patterns in current flow closely mirror the availability of high quality forest habitat. 
+
+It is important to not that the exact flow of current should be treated with caution as the map resolution is very coarse. See below for a high resolution case study. 
+
+#### Equal current
+Although the above method is good to understand how the number of animals flows across the landscape, if we are directly interested in the paths themselves we can give each protected area the same amount of electrical current.  We then more easily compare patterns at the landscape scale.
+
+```{r, eval=T, echo=F, message=F, warning=F}
+# Normalised source
+res_cur_norm <- rast("data/Chapter6/Coastal_pa_all_low_res/output/pas_lowres_normalised_curmap.asc")
+terra::crs(res_cur_norm) <- "EPSG:31971"
+
+res_clamp <- clamp(res_cur_norm, upper=0.5)
+# Make low current NA
+res_clamp <- app(res_clamp, fun=function(x){ x[x < 0.02] <- NA; return(x)} )
+#plot(res_clamp)
+
+end_poly_17N <- st_as_sf(end_poly_17N)
+
+#And the fragment importance like this:
+res_cur_norm_ras <- raster(res_clamp)
+crs(res_cur_norm_ras) <- "EPSG:31971"
+res_cur_norm_mask <- mask(res_cur_norm_ras, end_poly_17N, inverse=T)
+
+pal <- colorNumeric(c("#0C2C84", "#41B6C4", "#FFFFCC"), values(res_cur_norm_mask),
+  na.color = "transparent")
+
+
+# leaflet() %>%
+#   addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+#   addProviderTiles("OpenStreetMap", group="OSM") %>%
+#   addRasterImage(cost, group="Conductance") %>%
+#   addRasterImage(final_cur, group="Current", colors = pal) %>%
+#   addPolygons(data=end_sf, fillColor = "red",stroke = F, label=end_sf$NAME, fillOpacity = 1, group="Target area") %>% 
+#   addLegend(pal = pal, values = values(final_cur),
+#     title = "Current flow") %>%
+#     addPolygons(data=boundary, fillColor = "yellow",stroke = TRUE, color="red",fillOpacity = 0) %>%
+#    addLayersControl(
+#     baseGroups = c("Satellite","OSM"),
+#     overlayGroups = c("Conductance","Current", "Target area"))%>% 
+#     hideGroup("Conductance") 
+
+#plot(res_cur_norm_mask)
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addRasterImage(res_cur_norm_mask, group="Raster", colors = pal) %>%  #  
+ # addPolygons(data=end_sf, fillColor = "black",
+  #             label = end_sf$NAME, group="High_pa", stroke=F, fillOpacity = 1) %>% 
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Raster","High_pa")) %>%
+  addLegend(pal = pal, values = values(res_cur_norm_mask),
+    title = "Current flow")      #%>%
+  #addPolylines(data=tmp_lcp, weight = 2, fillColor = "blue",
+   #            label = tmp_lcp$ID)# %>% 
+  #addCircleMarkers(data=tmp_end, col="black", radius=1)
+
+
+
+```
+
+
+#### High elevation area importance
+A third way in which we can use Circuitscape to understand patterns in animal connectivity is the hold all of the source locations at a constant voltage, then quantify the amount of current each of the destination locations accrues. This will give an index of the "importance" of each high elevation protected area: the higher the score it accumulates the higher the number of lowland protected areas which are contributing charge towards it, and the more "important" the high elevation protected area to landscape scale climate resilience. 
+
+
+```{r, echo=F, message=F, warning=F, include=F}
+# Normalised source
+res_cur_norm <- raster(res_cur_norm)
+res_cur_norm_mask_2 <- mask(res_cur_norm, end_poly_17N, inverse=F)
+res_cur_norm_mask_2
+
+# Define a palette
+pal <- colorNumeric(c("#91bfdb", "#ffffbf", "#fc8d59"), values(res_cur_norm_mask_2),
+  na.color = "transparent")
+crs(res_cur_norm_mask_2) <- "EPSG:31971"
+
+#plot(res_cur_norm_mask_2)
+```
+
+
+```{r, echo=F, message=F, warning=F}
+
+leaflet() %>%
+  #addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldGrayCanvas") %>%
+  addRasterImage(res_cur_norm_mask_2, group="Raster", colors = pal) %>% 
+  addPolygons(data=end_sf, fillColor = "black",
+               label = end_sf$NAME, group="High_pa", stroke=F, fillOpacity = 0) %>% 
+  addLegend(pal = pal, values = values(res_cur_norm_mask_2),
+    title = "Current accrued")      #%>%
+  #addPolylines(data=tmp_lcp, weight = 2, fillColor = "blue",
+   #            label = tmp_lcp$ID)# %>% 
+  #addCircleMarkers(data=tmp_end, col="black", radius=1)
+
+
+```
+
+
+This plot demonstrates that La Amistad receives input from a disproportionately high number of lowland protected areas. Other important protected areas are Sierra de las Minas in Guatamala, and Cordillera Volcanica Central in Costa Rica.  
+
+
+
+
+
+```{r, echo=T, warning=F, message=F, include=F, eval=F}
+# For each run specify a new path
+### Mangroves
+
+# Specify the focal areas
+dir.create("Data/Chapter6/Mangroves_all_low_res")
+path_text <- "Data/Chapter6/Mangroves_all_low_res"
+
+#1 Osa Peninsula
+#Read in your simple cost surface
+simple_cost <- read_stars("Data/Chapter5/Low_res_resistance_surface.tif")
+plot(simple_cost)
+
+# Read in the mangrove shapes
+res_mangrove_shp <- readRDS("data/Chapter3/lcp_test/mangroves_to_protected_shp.rds")
+
+# # Read in the mangroves
+# mangrove_large <- st_read("data/spatial/mangroves/mangrove_large_1kmsq.shp")
+# mangrove_large <- st_read("data/spatial/mangroves/mangrove_large_1kmsq.shp")
+# mangrove_large_17N <- st_transform(mangrove_large, 31971)
+
+# Read the starting polygons
+#terrestrial_node <- st_read("data/spatial/protected_areas/Terrestrial_focal_areas.shp")
+start_poly <- st_read("data/spatial/WCMC010_MangrovesUSGS2011_v1_4/clipped/mangroves_clipped.shp", quiet = TRUE)
+
+# subset to only >1km2 (the resolution of this layer)
+start_poly_17N <- st_transform(start_poly, 31971)
+start_poly <- start_poly_17N[as.numeric(st_area(start_poly_17N))>(1000*1000),]
+
+# Read in the final destinations
+end_poly <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp")
+end_poly_17N <- st_transform(end_poly, 31971)
+
+
+
+# Visualise the current paths
+plot(st_geometry(roi_17N), col="lightgrey", border=F)
+plot(st_geometry(res_mangrove_shp), add=T)
+
+res_mangrove_17N <- st_transform(res_mangrove_shp, 31971)
+
+
+# Add the protected areas
+#plot(st_geometry(terrestrial_node_17N), add=T, col="green")
+
+#head(terrestrial_node_17N)
+# Zoom into focal area
+#tmp <- terrestrial_node_17N[terrestrial_node_17N$NAME=="Corcovado",]
+
+# Buffer corcovado and pull out the closest track
+#plot(st_geometry(st_buffer(tmp,40000)))
+#plot(st_geometry(res_terrestrial_17N), add=T)
+
+#tmp <- st_buffer(tmp,40000)
+#test <- res_mangrove_17N[st_intersects(res_mangrove_17N, tmp, sparse=F),]
+# Subset to the shortest path
+#test$length<- st_length((test))
+
+#test <- test[order(test$length),]
+#test <- test[1,]
+
+# Buffer the shortest path and make that your focal landscape
+
+#plot(st_geometry(st_buffer(test, 50000)))
+#plot(st_geometry(roi_17N), add=T)
+
+# Pull this aoi and use it to crop your cost surfaces
+#aoi_test <- st_as_sfc(st_bbox(st_buffer(test, 50000)))
+
+# Now crop your focal layers to the AOI -> mangrove protected areas and endpoints
+#par(mar=c(1,1,1,1))
+#plot(st_geometry(aoi_test))
+
+
+# I have an issue where
+
+
+# Cost surface
+#cost_test <-  st_crop(simple_cost, aoi_test) 
+#plot(cost_test, add=T)  
+#write_stars(cost_test, "data/Chapter6/test1_files/cost_test.tif")
+
+# Read in in raster format
+#cellmap <- raster("data/Chapter6/test1_files/cost_test.tif")
+cellmap <- raster("Data/Chapter5/Low_res_resistance_surface.tif")
+
+NAvalue(cellmap) <- -9999
+plot(cellmap)
+
+writeRaster(cellmap, paste0(path_text,"/cellmap.asc"), overwrite=T)
+
+## Starting layers (terrestrial protected areas)
+#start_blocks <- st_intersection(terrestrial_node_17N, aoi_test) 
+start_blocks <- terrestrial_node_17N
+# n= 201
+plot(st_geometry(start_blocks), add=T, col="black")
+
+  # Read in a stars object to use as a template
+  tmp <- read_stars("Data/Chapter5/Low_res_resistance_surface.tif")
+
+  # Assign an id to the polygons
+  start_blocks$node <- 1:nrow(start_blocks)
+  start_blocks <- start_blocks[, c("node"),]
+
+  # ???Pick a random point within mangroves to start from
+  
+  start_polygons <- st_rasterize(start_blocks, template=tmp, align=T)
+  plot(start_polygons)
+
+  # Assign the starting current
+  sources<- start_polygons
+  #plot(st_centroid(start_blocks))
+  sources[sources>0] <- 1
+  plot(sources)
+
+## End layers (high elevation protected areas)
+  #end_blocks <- st_intersection(high_pa_17N, aoi_test) 
+  end_blocks <- high_pa_17N 
+  end_blocks$node<-9999
+  end_blocks <- end_blocks[, c("node")]
+  #plot(st_geometry(end_blocks), add=T, col="red")
+  end_polygons <- st_rasterize(end_blocks, template=tmp, align=T)
+
+  plot(end_polygons)
+
+## Add the resistance to the terminal location
+  grounds <- end_polygons 
+  grounds[grounds>0] <- 1  
+  
+plot(st_as_sfc(st_bbox(cellmap)))
+plot(st_as_sfc(st_bbox(start_polygons)), col=rgb(0,1,0,0.2), add=T)
+plot(st_as_sfc(st_bbox(end_polygons)), col=rgb(1,0,0,0.2), add=T)
+plot(st_as_sfc(st_bbox(sources)), col=rgb(0,0,1,0.2), add=T)
+
+# Address this issue when they are reimported as rasters
+
+write_stars(start_polygons,paste0(path_text,"/start_poly_stars.tif" ))
+write_stars(end_polygons, paste0(path_text,"/end_poly_stars.tif" ))
+write_stars(sources,paste0(path_text,"/sources_stars.tif" ))
+write_stars(grounds,paste0(path_text,"/grounds_stars.tif" ))
+
+# read them back in with the raster package
+start_polygons <- raster(paste0(path_text,"/start_poly_stars.tif"))
+end_polygons <- raster(paste0(path_text,"/end_poly_stars.tif"))
+sources_polygons <- raster(paste0(path_text,"/sources_stars.tif"))
+grounds_polygons <- raster(paste0(path_text,"/grounds_stars.tif"))
+
+# Match resolutions with the cost surface (cellmap)
+plot(cellmap)
+plot(start_polygons)
+
+start_final     <- extend(start_polygons, cellmap)
+end_final       <- extend(end_polygons, cellmap)
+sources_final   <- extend(sources_polygons, cellmap)
+grounds_final   <- extend(grounds_polygons, cellmap)
+
+
+extent(cellmap)
+extent(regions_grid_final)
+extent(sources_final)
+extent(grounds_final)
+
+# Sources is too large
+sources_final <- crop(sources_final, cellmap)
+
+# Before add them... na's must be 0's
+start_final[is.na(start_final)==T] <- 0
+end_final[is.na(end_final)==T] <- 0
+
+regions_grid_final  <- end_final+start_final
+
+# Return them to NA';'s
+regions_grid_final[regions_grid_final==0] <- NA
+plot(regions_grid_final, col="black")
+regions_grid_final <- extend(regions_grid_final, cellmap)
+
+extent(cellmap)
+extent(regions_grid_final)
+
+
+writeRaster(regions_grid_final, paste0(path_text,"/regions_grid.asc"), overwrite=T)
+writeRaster(sources_final, paste0(path_text,"/sources.asc"), overwrite=T)
+writeRaster(grounds_final, paste0(path_text,"/grounds.asc"), overwrite=T)
+
+
+dir.create(paste0(path_text,"/output"))
+
+```
+
+```{r, echo=F, message=F, warning=F, eval=F, include=F}
+
+#*IMPORTANT* Current is on a different scale to the PA analysis, it is much weaker as the source areas are much slower. 
+
+
+# Plot the result
+res_cur <- rast("data/Chapter6/Mangroves_all_low_res/output/mangroves_lowres_curmap.asc")
+# GIve it the crs
+terra::crs(res_cur) <- "EPSG:31971"
+
+end_poly <- vect("data/spatial/area_of_interest/high_elevation_pas.shp")
+end_poly_17N <- project(end_poly, "EPSG:31971")
+
+
+# Raw current
+#plot(res_cur)
+res_clamp <- clamp(res_cur, upper=10)
+# Make low current NA
+res_clamp <- app(res_clamp, fun=function(x){ x[x < 0.1] <- NA; return(x)} )
+#plot(res_clamp)
+
+
+# Masked current (no sources)
+res_clamp <- mask(res_clamp, end_poly_17N, inverse=T)
+
+
+# Check before convery to raster
+#plot(res_clamp)
+#plot(st_geometry(roi_17N), add=T)
+
+man_cond_final <- as(res_clamp, "Raster")
+
+# Reimport start and ends
+end_sf <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp")
+end_sf_17N <- st_transform(end_sf, 31971)
+# pdf("data/images/pa_cur_low.pdf",height=6.5, width=8)
+# plot(res_clamp)
+# plot(st_geometry(roi_17N), add=T)
+# plot(st_geometry(end_poly_17N), add=T, col="black")
+# dev.off()
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addRasterImage(man_cond_final, group="Raster") %>% 
+  addPolygons(data=end_sf, fillColor = "black",
+               label = end_sf$NAME, group="High_pa", stroke=F, fillOpacity = 1) %>% 
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Raster","High_pa")) #%>%
+  #addPolylines(data=tmp_lcp, weight = 2, fillColor = "blue",
+   #            label = tmp_lcp$ID)# %>% 
+  #addCircleMarkers(data=tmp_end, col="black", radius=1)
+
+
+writeRaster(man_cond_final, "data/Chapter7/Conductivity_man_high_100m_res.tif", overwrite=T)
+
+
+```
+
+### Fine scale (100m)
+
+The maps shown above are useful, but they are at a scale which is not amenable to making explicit management recommendations. The next step is to use a higher resolution cost surface, see [Chapter 5](#cost-surface_high).
+
+From earlier model tests we determined that we can run landscapes at 100m x 100m resolutions in two hours. 10 x 10m grids would take days. I now provide an example case study based on the Osa Peninsula region of the power of high resolution connectivity analyses.
+
+#### Case Study 1: Osa Peninsula
+
+Here we use the high resolution resistance layer developed in Chapter 4 to quantify finescale patterns in connectivity within the Osa Peninsula. As in the central america wide example, each protected area contributes an electrical current proportion to the size of the park. Current is applied at the midpoint (rather than the protected area as a whole) to allow current to move naturally throughout the protected areas.
+
+As above, the colors denote the magnitude of current flow: blue = low current flow, yellow = high current flow. 
+
+```{r, include=F, eval=F, echo=F}
+
+##### PREP THE HIGH RESOLUTION LAYER FOR STEP 1
+
+library(terra)
+lc <- rast("data/spatial/landcover/ESACCI-LC-L4-LC10-Map-10m-CAM.tif")
+#Subset to just osa xmin, x max, ymin, ymax
+coords <- c(-84, -82.5,8.38,9.38)
+aoi <-  ext(coords)
+lc_sub  <- crop(lc, aoi)
+
+# Downscale it!
+lc_sub_small <- aggregate(lc_sub, fact=10, fun="modal")
+
+# Convert to a raster
+lc_sub_small <- as(lc_sub_small,"Raster")
+colours <- lc_key$rgb
+# Plot it in leaflet
+at <- seq(-0.5, 10.5, 1)
+cb <- colorBin(palette = colours, bins = at, domain = at)
+
+leaflet() %>%
+    addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+    addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+    addRasterImage(lc_sub_small, colors = cb, group="Raster") %>%
+    addLegend(colors = lc_key$rgb, labels=lc_key$LCCOwnLabel)%>% 
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Raster")) 
+
+# Subest the biomass layer
+biomass <- rast("data/spatial/biomass/NASA_biomass_desnity_estimation.tif")
+biomass_sub  <- crop(biomass, aoi)
+biomass_sub_ras  <- as(biomass_sub,"Raster")
+
+
+m2     <- c(0, NA,
+            1, 1000,
+            2, 150,
+            3, 50,
+            4, 60,
+            5, 20,
+            6, 40,
+            7, 10,
+            8, NA,
+            9, NA,
+            10,2
+            )
+m2 <- matrix(m2, ncol=2, byrow = TRUE)
+
+# workflow
+
+  #Import the raster
+  
+  #Reclassify according to my values
+
+  # Then split out rasters for each habitat type and moderate them.
+
+# Reclassify the map
+lc_re <- classify(lc_sub, m2, right=TRUE)
+
+# Downscale to 100m resolution
+#lc_re_small <- aggregate(lc_re, fact=10, fun="modal")
+lc_re_small <- aggregate(lc_re, fact=10, fun="mean")
+
+lc_re_small_ras <- as(lc_re_small,"Raster")
+
+
+# Add the modifier
+biomass_sub <- clamp(biomass_sub, upper=100)
+#plot(biomass_sub)
+biomass_modifier <- biomass_sub/100
+plot(biomass_modifier)
+
+# Mask out non-forest
+just_forest <- ifel(lc_sub_small == 1, 1, NA)
+#plot(just_forest)
+# Match the resolutions
+biomass_modifier <-  resample(biomass_modifier, just_forest)
+# Keep non-forest areas the same too!                      
+biomass_modifier <- mask(biomass_modifier,just_forest, updatevalue=1)
+
+# Take the product
+
+cost_final <- lc_re_small*biomass_modifier
+#plot(lc_osa_final)
+
+cost_final_ras <- as(cost_final,"Raster")
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addRasterImage(lc_re_small_ras, group="Original") %>%
+  addRasterImage(cost_final_ras, group="Modified") %>%
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Original", "Modified")) 
+
+# import mangroves
+mangrove <- vect("data/spatial/WCMC010_MangrovesUSGS2011_v1_4/clipped/mangroves_clipped.shp")
+#rasterise
+mangrove <- rasterize(mangrove, cost_final, 800)
+
+cost_final_mangrove <- cover(mangrove,cost_final)
+
+cost_final_ras <- as(cost_final_mangrove,"Raster")
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addRasterImage(lc_re_small_ras, group="Original") %>%
+  addRasterImage(cost_final_ras, group="Modified") %>%
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Original", "Modified")) 
+
+dir.create("Data/Chapter6/Case_study_1_Osa/")
+
+writeRaster(cost_final_ras, "Data/Chapter6/Case_study_1_Osa/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+writeRaster(cost_final_ras, "Data/Chapter6/Case_study_1_Osa/cost_surface_100m.tif", overwrite=TRUE)
+
+```
+
+
+```{r, echo=F, eval=F, message=F, warning=F}
+# Cell map already exists (see chapter 4)
+
+lc <- rast("Data/Chapter6/Case_study_1_Osa/cost_surface_100m.tif")
+# lets try a high res circuit scape  
+#start <- focal_pa[focal_pa$NAME=="Corcovado",]
+
+start <- vect("data/spatial/protected_areas/Coastal_protected_areas.shp")
+end <- vect("data/spatial/area_of_interest/high_elevation_pas.shp")
+
+# Add area (for current)
+start$area_km <- round(start_v$GIS_AREA,0)
+#plot(start_v)
+
+
+#start_ras <- rasterize(start_v,lc_re_small, field=1)
+end_ras <- rasterize(end,lc, field=999)
+polygons <- end_ras
+plot(polygons)
+
+start_p <- centroids(start_v, inside=T)
+sources <- rasterize(start_p,lc, 
+             field="area_km") # make the 
+end_p <- centroids(end_v, inside=T)
+grounds <- rasterize(end_p,lc_re_small, 
+             field=1) # make the area the current
+
+# Check the centroid is working
+# plot(start[start$NAME=="Golfo Dulce",])
+# 
+# plot(start_p, add=T, cex=3)
+# #plot(centroids(start_v, inside=T), add=T)
+# plot(sources, add=T, col="pink") 
+            
+lc    <- as(lc,"Raster")
+polygons_ras <- as(polygons,"Raster")
+sources_ras    <- as(sources,"Raster")
+grounds_ras    <- as(grounds,"Raster")
+
+
+# Write the objects
+dir.create("Data/Chapter6/Case_study_1_Osa")
+
+# Cell map - Done
+#writeRaster(lc_re_ras, "Data/Chapter6/Osa_test_low_res/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+# Source
+writeRaster(sources_ras, "Data/Chapter6/Case_study_1_Osa/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+# Ground
+writeRaster(grounds_ras, "Data/Chapter6/Case_study_1_Osa/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+# Polygon
+writeRaster(polygons_ras, "Data/Chapter6/Case_study_1_Osa/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+dir.create("Data/Chapter6/Case_study_1_Osa/output")
+```
+
+
+```{r, echo=F, message=F, warning=F}
+# Import the original cost surface
+lc <- rast("Data/Chapter6/Case_study_1_Osa/cost_surface_100m.tif")
+
+# Plot the result - TIME TAKEN 6454 seconds - will try with different solver
+res_cur <- rast("Data/Chapter6/Case_study_1_Osa/output/Case_study_1_curmap.asc")
+
+start <- vect("data/spatial/protected_areas/Coastal_protected_areas.shp")
+
+
+#plot(res_cur, zlim=c(0.1,15))
+
+res_clamp <- clamp(res_cur, upper=15)
+#res_clamp[res_clamp<0.5] <- NA
+# Convert the landcover map
+# mask outlow voltage areas
+res_clamp <- app(res_clamp, fun=function(x){ x[x < 0.1] <- NA; return(x)} )
+
+# Add in start nodes
+
+# Add in protect areas (cropped to the area)
+tmp <- crop(start, res_cur)
+start_sf <- sf::st_as_sf(tmp)
+
+#plot(res_clamp)
+final_cur    <- as(res_clamp,"Raster")
+cost    <- as(lc,"Raster")
+
+boundary<- st_as_sfc(st_bbox(final_cur))
+
+pal <- colorNumeric(c("#0C2C84", "#41B6C4", "#FFFFCC"), values(final_cur),
+  na.color = "transparent")
+
+# Add end polygons
+end <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp", quiet=T)
+aoi_sf <- st_as_sfc(st_bbox(cost))
+end_sf <- st_crop(end, aoi_sf)
+
+
+leaflet() %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addProviderTiles("OpenStreetMap", group="OSM") %>%
+  addRasterImage(cost, group="Conductance") %>%
+  addRasterImage(final_cur, group="Current", colors = pal) %>%
+  addPolygons(data=end_sf, fillColor = "red",stroke = F, label=end_sf$NAME, fillOpacity = 1, group="Target area") %>% 
+  addLegend(pal = pal, values = values(final_cur),
+    title = "Current flow") %>%
+    addPolygons(data=boundary, fillColor = "yellow",stroke = TRUE, color="red",fillOpacity = 0) %>%
+   addLayersControl(
+    baseGroups = c("Satellite","OSM"),
+    overlayGroups = c("Conductance","Current", "Target area"))%>% 
+    hideGroup("Conductance") 
+
+
+
+
+```
+
+The above map shows two interesting elements:
+
+i) Firstly, it highlights the importance of protected and contiguous habitat in the neck of the peninsula, north of Corcovado. All routes must pass through here, hence the electrical current flow is relatively high.
+
+ii) Secondly, despite the existence of existing "corridors" through the matrix of disturbed and human modified habitat between the peninsula and La Amistad to the north - there is no clear patch of least resistance. Cnnectivity appears to be highly diffuse and low across the whole region. This suggests that there is only weak functional connectivity between the Peninsula and La Amistad, and that climate resilience may be low. 
+
+It is also import to check if connectivity map generated holds up local scales. An example plantation below suggests that the electric flow maps well on to how we would expect large terrestrial mammals to move through this system:
+
+```{r , echo=F, message=F, warning=F}
+knitr::include_graphics("data/images/example.PNG")
+```
+
+Which suggests that such maps can be used to direct local restoration efforts aimed at improving ridge to reef connectivity in the region.
+
+#### Case Study 2: Guanacaste
+This case study details the connections between Santa Rosa National Park and the highland areas of Volcan Cacao, Rincon de la Vieja and National Park Miravalles - Jorge Manuel Dengo. All of the highland areas have some degree of connectivity, however there is a very important corridor of connectivity (hot yellow in color) between Santa Rosa and the highlands of Volcan Cacao (see below). Much of this landscape is protected (to some degree), so this could be an example of a relatively "safe" climate corridor. 
+
+```{r, include=F, eval=F, echo=F}
+
+##### PREP THE HIGH RESOLUTION LAYER FOR STEP 1
+
+#10.54061994108337, -84.82711654088256
+
+
+library(terra)
+library(raster)
+lc <- rast("data/spatial/landcover/ESACCI-LC-L4-LC10-Map-10m-CAM.tif")
+#Subset to just osa xmin, x max, ymin, ymax
+coords <- c(-86.025, -84.82711,
+           10.54061, 11.2)
+aoi <-  ext(coords)
+lc_sub  <- crop(lc, aoi)
+
+# Downscale it!
+lc_sub_small <- aggregate(lc_sub, fact=10, fun="modal")
+
+# Convert to a raster
+lc_sub_small_ras <- as(lc_sub_small,"Raster")
+colours <- lc_key$rgb
+# Plot it in leaflet
+at <- seq(-0.5, 10.5, 1)
+cb <- colorBin(palette = colours, bins = at, domain = at)
+
+leaflet() %>%
+    addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+    addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+    addRasterImage(lc_sub_small_ras, colors = cb, group="Raster") %>%
+    addLegend(colors = lc_key$rgb, labels=lc_key$LCCOwnLabel)%>% 
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Raster")) 
+
+# Subest the biomass layer
+biomass <- rast("data/spatial/biomass/NASA_biomass_desnity_estimation.tif")
+biomass_sub  <- crop(biomass, aoi)
+biomass_sub_ras  <- as(biomass_sub,"Raster")
+
+
+m2     <- c(0, NA,
+            1, 1000,
+            2, 150,
+            3, 50,
+            4, 60,
+            5, 20,
+            6, 40,
+            7, 10,
+            8, NA,
+            9, NA,
+            10,2
+            )
+m2 <- matrix(m2, ncol=2, byrow = TRUE)
+
+# workflow
+
+  #Import the raster
+  
+  #Reclassify according to my values
+
+  # Then split out rasters for each habitat type and moderate them.
+
+# Reclassify the map
+lc_re <- classify(lc_sub, m2, right=TRUE)
+
+# Downscale to 100m resolution
+#lc_re_small <- aggregate(lc_re, fact=10, fun="modal")
+lc_re_small <- aggregate(lc_re, fact=10, fun="mean")
+
+lc_re_small_ras <- as(lc_re_small,"Raster")
+
+# Add the modifier
+biomass_sub <- clamp(biomass_sub, upper=100)
+#plot(biomass_sub)
+biomass_modifier <- biomass_sub/100
+plot(biomass_modifier)
+
+
+
+# Mask out non-forest
+just_forest <- ifel(lc_sub_small == 1, 1, NA)
+#plot(just_forest)
+# Match the resolutions
+biomass_modifier <-  resample(biomass_modifier, just_forest)
+# Keep non-forest areas the same too!                      
+biomass_modifier <- mask(biomass_modifier,just_forest, updatevalue=1)
+
+# Take the product
+
+cost_final <- lc_re_small*biomass_modifier
+#plot(lc_osa_final)
+
+cost_final_ras <- as(cost_final,"Raster")
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addRasterImage(lc_re_small_ras, group="Original") %>%
+  addRasterImage(cost_final_ras, group="Modified") %>%
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Original", "Modified")) 
+
+# import mangroves
+mangrove <- vect("data/spatial/WCMC010_MangrovesUSGS2011_v1_4/clipped/mangroves_clipped.shp")
+#rasterise
+mangrove <- rasterize(mangrove, cost_final, 800)
+
+cost_final_mangrove <- cover(mangrove,cost_final)
+
+cost_final_ras <- as(cost_final_mangrove,"Raster")
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addRasterImage(lc_re_small_ras, group="Original") %>%
+  addRasterImage(cost_final_ras, group="Modified") %>%
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Original", "Modified")) 
+
+dir.create("Data/Chapter6/Case_study_2/")
+
+writeRaster(cost_final_ras, "Data/Chapter6/Case_study_2/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+writeRaster(cost_final_ras, "Data/Chapter6/Case_study_2/cost_surface_100m.tif", overwrite=TRUE)
+
+```
+
+```{r, echo=F, eval=F, message=F, warning=F}
+# Cell map already exists (see chapter 4)
+
+lc <- rast("Data/Chapter6/Case_study_2/cost_surface_100m.tif")
+# lets try a high res circuit scape  
+#start <- focal_pa[focal_pa$NAME=="Corcovado",]
+
+start <- vect("data/spatial/protected_areas/Coastal_protected_areas.shp")
+# Remove marine areas
+
+land_shp <- vect("data/spatial/area_of_interest/aoi.shp")
+start_cropped <- crop(start, land_shp)
+# plot(start_cropped)
+# plot(start, add=T, col="lightblue")
+# plot(test, add=T)
+
+
+  end <- vect("data/spatial/area_of_interest/high_elevation_pas.shp")
+
+# Convert to a spatvect
+start_tmp <- as(start_cropped, "Spatial")
+start_v <- vect(start_tmp)
+end_tmp <- as(end, "Spatial")
+end_v <- vect(end_tmp)
+
+# Add area (for current)
+start$area_km <- round(start_v$GIS_AREA,0)
+#plot(start_v)
+
+
+#start_ras <- rasterize(start_v,lc_re_small, field=1)
+end_ras <- rasterize(end,lc, field=999)
+polygons <- end_ras
+plot(polygons)
+
+# remove the marine area
+start_v$area_km<- start_v$GIS_AREA - start_v$GIS_M_AREA
+
+
+head(start_v)
+start_p <- centroids(start_v, inside=T)
+sources <- rasterize(start_p,lc, 
+             field="area_km") # make the 
+end_p <- centroids(end_v, inside=T)
+grounds <- rasterize(end_p,lc_re_small, 
+             field=1) # make the area the current
+
+
+plot(cost_final_ras)
+plot(start_v, add=T)
+plot(start_p, add=T)
+
+
+# Check the centroid is working
+# plot(start[start$NAME=="Golfo Dulce",])
+# 
+# plot(start_p, add=T, cex=3)
+# #plot(centroids(start_v, inside=T), add=T)
+# plot(sources, add=T, col="pink") 
+            
+lc    <- as(lc,"Raster")
+polygons_ras <- as(polygons,"Raster")
+sources_ras    <- as(sources,"Raster")
+grounds_ras    <- as(grounds,"Raster")
+
+plot(polygons_ras)
+plot(sources_ras)
+plot(grounds_ras)
+
+
+
+# Write the objects
+dir.create("Data/Chapter6/Case_study_2")
+
+# Source
+writeRaster(sources_ras, "Data/Chapter6/Case_study_2/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+# Ground
+writeRaster(grounds_ras, "Data/Chapter6/Case_study_2/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+# Polygon
+writeRaster(polygons_ras, "Data/Chapter6/Case_study_2/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+dir.create("Data/Chapter6/Case_study_2/output")
+```
+
+```{r, echo=F, message=F, warning=F}
+# Import the original cost surface
+lc <- rast("Data/Chapter6/Case_study_2/cost_surface_100m.tif")
+
+# Plot the result - TIME TAKEN 6454 seconds - will try with different solver
+res_cur <- rast("Data/Chapter6/Case_study_2/output/Case_study_1_curmap.asc")
+
+start <- vect("data/spatial/protected_areas/Coastal_protected_areas.shp")
+
+
+#plot(res_cur)
+
+res_clamp <- clamp(res_cur, upper=10)
+# plot(res_clamp)
+# Convert the landcover map
+# mask outlow voltage areas
+res_clamp <- app(res_clamp, fun=function(x){ x[x < 0.1] <- NA; return(x)} )
+
+# Add in start nodes
+
+# Add in protect areas (cropped to the area)
+tmp <- crop(start, res_cur)
+start_sf <- sf::st_as_sf(tmp)
+
+#plot(res_clamp)
+final_cur    <- as(res_clamp,"Raster")
+cost    <- as(lc,"Raster")
+
+boundary<- st_as_sfc(st_bbox(final_cur))
+
+pal <- colorNumeric(c("#0C2C84", "#41B6C4", "#FFFFCC"), values(final_cur),
+  na.color = "transparent")
+
+# Add end polygons
+end <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp", quiet=T)
+aoi_sf <- st_as_sfc(st_bbox(cost))
+end_sf <- st_crop(end, aoi_sf)
+
+
+leaflet() %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addProviderTiles("OpenStreetMap", group="OSM") %>%
+  addRasterImage(cost, group="Conductance") %>%
+  addRasterImage(final_cur, group="Current", colors = pal) %>%
+  addPolygons(data=end_sf, fillColor = "red",stroke = F, label=end_sf$NAME, ,fillOpacity = 1) %>% 
+  addLegend(pal = pal, values = values(final_cur),
+    title = "Current flow") %>%
+    addPolygons(data=boundary, fillColor = "yellow",stroke = TRUE, color="red",fillOpacity = 0) %>%
+   addLayersControl(
+    baseGroups = c("Satellite","OSM"),
+    overlayGroups = c("Conductance","Current"))%>% 
+    hideGroup("Conductance") 
+
+
+```
+
+
+#### Case Study 3: San Pedro
+
+The "San Pedro" climate corridor links the highland Cerro Azul National Park and Cusuco National Park with lowland protected areas in Belize, Guatamala and Honduras. Although the path is relatively short, the human disturbance in the region in substantial. Combined with the fact that this landscape spans three administrative boundaries suggests with may be logistically complicated to establish an official corridor here. 
+
+```{r, include=F, eval=F, echo=F}
+
+##### PREP THE HIGH RESOLUTION LAYER FOR STEP 1
+
+#10.54061994108337, -84.82711654088256
+
+
+library(terra)
+library(raster)
+lc <- rast("data/spatial/landcover/ESACCI-LC-L4-LC10-Map-10m-CAM.tif")
+#Subset to just osa xmin, x max, ymin, ymax
+
+
+
+
+coords <- c(-89.215, -87.8128,
+           14.9906, 16.2100)
+aoi <-  ext(coords)
+lc_sub  <- crop(lc, aoi)
+
+# Downscale it!
+lc_sub_small <- aggregate(lc_sub, fact=10, fun="modal")
+
+# Convert to a raster
+lc_sub_small_ras <- as(lc_sub_small,"Raster")
+colours <- lc_key$rgb
+# Plot it in leaflet
+at <- seq(-0.5, 10.5, 1)
+cb <- colorBin(palette = colours, bins = at, domain = at)
+
+leaflet() %>%
+    addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+    addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+    addRasterImage(lc_sub_small_ras, colors = cb, group="Raster") %>%
+    addLegend(colors = lc_key$rgb, labels=lc_key$LCCOwnLabel)%>% 
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Raster")) 
+
+# Subest the biomass layer
+biomass <- rast("data/spatial/biomass/NASA_biomass_desnity_estimation.tif")
+biomass_sub  <- crop(biomass, aoi)
+biomass_sub_ras  <- as(biomass_sub,"Raster")
+
+
+m2     <- c(0, NA,
+            1, 1000,
+            2, 150,
+            3, 50,
+            4, 60,
+            5, 20,
+            6, 40,
+            7, 10,
+            8, NA,
+            9, NA,
+            10,2
+            )
+m2 <- matrix(m2, ncol=2, byrow = TRUE)
+
+# workflow
+
+  #Import the raster
+  
+  #Reclassify according to my values
+
+  # Then split out rasters for each habitat type and moderate them.
+
+# Reclassify the map
+lc_re <- classify(lc_sub, m2, right=TRUE)
+
+# Downscale to 100m resolution
+#lc_re_small <- aggregate(lc_re, fact=10, fun="modal")
+lc_re_small <- aggregate(lc_re, fact=10, fun="mean")
+
+lc_re_small_ras <- as(lc_re_small,"Raster")
+
+# Add the modifier
+biomass_sub <- clamp(biomass_sub, upper=100)
+#plot(biomass_sub)
+biomass_modifier <- biomass_sub/100
+plot(biomass_modifier)
+
+
+
+# Mask out non-forest
+just_forest <- ifel(lc_sub_small == 1, 1, NA)
+#plot(just_forest)
+# Match the resolutions
+biomass_modifier <-  resample(biomass_modifier, just_forest)
+# Keep non-forest areas the same too!                      
+biomass_modifier <- mask(biomass_modifier,just_forest, updatevalue=1)
+
+# Take the product
+
+cost_final <- lc_re_small*biomass_modifier
+#plot(lc_osa_final)
+
+cost_final_ras <- as(cost_final,"Raster")
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addRasterImage(lc_re_small_ras, group="Original") %>%
+  addRasterImage(cost_final_ras, group="Modified") %>%
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Original", "Modified")) 
+
+# import mangroves
+mangrove <- vect("data/spatial/WCMC010_MangrovesUSGS2011_v1_4/clipped/mangroves_clipped.shp")
+#rasterise
+mangrove <- rasterize(mangrove, cost_final, 800)
+
+cost_final_mangrove <- cover(mangrove,cost_final)
+
+cost_final_ras <- as(cost_final_mangrove,"Raster")
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addRasterImage(lc_re_small_ras, group="Original") %>%
+  addRasterImage(cost_final_ras, group="Modified") %>%
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Original", "Modified")) 
+
+dir.create("Data/Chapter6/Case_study_3/")
+
+writeRaster(cost_final_ras, "Data/Chapter6/Case_study_3/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+writeRaster(cost_final_ras, "Data/Chapter6/Case_study_3/cost_surface_100m.tif", overwrite=TRUE)
+
+```
+
+```{r, echo=F, eval=F, message=F, warning=F, include=F}
+# Cell map already exists (see chapter 4)
+
+lc <- rast("Data/Chapter6/Case_study_3/cost_surface_100m.tif")
+# lets try a high res circuit scape  
+#start <- focal_pa[focal_pa$NAME=="Corcovado",]
+
+start <- vect("data/spatial/protected_areas/Coastal_protected_areas.shp")
+# Remove marine areas
+
+land_shp <- vect("data/spatial/area_of_interest/aoi.shp")
+start_cropped <- crop(start, land_shp)
+# plot(start_cropped)
+# plot(start, add=T, col="lightblue")
+# plot(test, add=T)
+
+
+  end <- vect("data/spatial/area_of_interest/high_elevation_pas.shp")
+
+# Convert to a spatvect
+start_tmp <- as(start_cropped, "Spatial")
+start_v <- vect(start_tmp)
+end_tmp <- as(end, "Spatial")
+end_v <- vect(end_tmp)
+
+# Add area (for current)
+start$area_km <- round(start_v$GIS_AREA,0)
+#plot(start_v)
+
+
+#start_ras <- rasterize(start_v,lc_re_small, field=1)
+end_ras <- rasterize(end,lc, field=999)
+polygons <- end_ras
+plot(polygons)
+
+# remove the marine area
+start_v$area_km<- start_v$GIS_AREA - start_v$GIS_M_AREA
+
+
+head(start_v)
+start_p <- centroids(start_v, inside=T)
+sources <- rasterize(start_p,lc, 
+             field="area_km") # make the 
+end_p <- centroids(end_v, inside=T)
+grounds <- rasterize(end_p,lc_re_small, 
+             field=1) # make the area the current
+
+
+plot(cost_final_ras)
+plot(start_v, add=T)
+plot(start_p, add=T)
+
+
+# Check the centroid is working
+# plot(start[start$NAME=="Golfo Dulce",])
+# 
+# plot(start_p, add=T, cex=3)
+# #plot(centroids(start_v, inside=T), add=T)
+# plot(sources, add=T, col="pink") 
+            
+lc    <- as(lc,"Raster")
+polygons_ras <- as(polygons,"Raster")
+sources_ras    <- as(sources,"Raster")
+grounds_ras    <- as(grounds,"Raster")
+
+plot(polygons_ras)
+plot(sources_ras)
+plot(grounds_ras)
+
+
+
+
+# Source
+writeRaster(sources_ras, "Data/Chapter6/Case_study_3/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+# Ground
+writeRaster(grounds_ras, "Data/Chapter6/Case_study_3/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+# Polygon
+writeRaster(polygons_ras, "Data/Chapter6/Case_study_3/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+dir.create("Data/Chapter6/Case_study_3/output")
+```
+
+```{r, echo=F, message=F, warning=F}
+# Import the original cost surface
+lc <- rast("Data/Chapter6/Case_study_3/cost_surface_100m.tif")
+
+# Plot the result - TIME TAKEN 6454 seconds - will try with different solver
+res_cur <- rast("Data/Chapter6/Case_study_3/output/Case_study_3_curmap.asc")
+
+start <- vect("data/spatial/protected_areas/Coastal_protected_areas.shp")
+
+
+#plot(res_cur)
+
+res_clamp <- clamp(res_cur, upper=10)
+# Convert the landcover map
+#plot(res_clamp)
+
+
+# mask outlow voltage areas
+res_clamp <- app(res_clamp, fun=function(x){ x[x < 0.1] <- NA; return(x)} )
+
+# Add in start nodes
+
+# Add in protect areas (cropped to the area)
+tmp <- crop(start, res_cur)
+start_sf <- sf::st_as_sf(tmp)
+
+#plot(res_clamp)
+final_cur    <- as(res_clamp,"Raster")
+cost    <- as(lc,"Raster")
+
+boundary<- st_as_sfc(st_bbox(final_cur))
+
+pal <- colorNumeric(c("#0C2C84", "#41B6C4", "#FFFFCC"), values(final_cur),
+  na.color = "transparent")
+
+# Add end polygons
+end <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp", quiet=T)
+aoi_sf <- st_as_sfc(st_bbox(cost))
+end_sf <- st_crop(end, aoi_sf)
+
+
+leaflet() %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addProviderTiles("OpenStreetMap", group="OSM") %>%
+  addRasterImage(cost, group="Conductance") %>%
+  addRasterImage(final_cur, group="Current", colors = pal) %>%
+  addPolygons(data=end_sf, fillColor = "red",stroke = F, label=end_sf$NAME, ,fillOpacity = 1) %>% 
+  addLegend(pal = pal, values = values(final_cur),
+    title = "Current flow") %>%
+    addPolygons(data=boundary, fillColor = "yellow",stroke = TRUE, color="red",fillOpacity = 0) %>%
+   addLayersControl(
+    baseGroups = c("Satellite","OSM"),
+    overlayGroups = c("Conductance","Current"))%>% 
+    hideGroup("Conductance") 
+
+
+```
+
+
+#### Case Study 4: La Ceiba
+The La Ceiba region contains a relatively large protected highland area: Pico Bonito National Park. Although it is largely isolated from the lowland Refugio Vida Silvestre and Punta Izopa National Parks (separated by a large swath of highly disturbed habitat), it is connected to the coastal Nombre de Dios to the north. Nombre de Dios has some highland areas of its own, and thus represents a completely self-contained and protected climate corridor. 
+
+```{r, include=F, eval=F, echo=F}
+
+##### PREP THE HIGH RESOLUTION LAYER FOR STEP 1
+
+#10.54061994108337, -84.82711654088256
+
+
+library(terra)
+library(raster)
+lc <- rast("data/spatial/landcover/ESACCI-LC-L4-LC10-Map-10m-CAM.tif")
+#Subset to just osa xmin, x max, ymin, ymax
+
+
+#15.887508635706352, -87.55715376488126
+#15.043100300689956, -86.17456610614043
+
+coords <- c(-87.55715, -86.1745661,
+           15.0431, 15.8875)
+aoi <-  ext(coords)
+lc_sub  <- crop(lc, aoi)
+
+# Downscale it!
+lc_sub_small <- aggregate(lc_sub, fact=10, fun="modal")
+
+# Convert to a raster
+lc_sub_small_ras <- as(lc_sub_small,"Raster")
+colours <- lc_key$rgb
+# Plot it in leaflet
+at <- seq(-0.5, 10.5, 1)
+cb <- colorBin(palette = colours, bins = at, domain = at)
+
+leaflet() %>%
+    addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+    addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+    addRasterImage(lc_sub_small_ras, colors = cb, group="Raster") %>%
+    addLegend(colors = lc_key$rgb, labels=lc_key$LCCOwnLabel)%>% 
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Raster")) 
+
+# Subest the biomass layer
+biomass <- rast("data/spatial/biomass/NASA_biomass_desnity_estimation.tif")
+biomass_sub  <- crop(biomass, aoi)
+biomass_sub_ras  <- as(biomass_sub,"Raster")
+
+
+m2     <- c(0, NA,
+            1, 1000,
+            2, 150,
+            3, 50,
+            4, 60,
+            5, 20,
+            6, 40,
+            7, 10,
+            8, NA,
+            9, NA,
+            10,2
+            )
+m2 <- matrix(m2, ncol=2, byrow = TRUE)
+
+# workflow
+
+  #Import the raster
+  
+  #Reclassify according to my values
+
+  # Then split out rasters for each habitat type and moderate them.
+
+# Reclassify the map
+lc_re <- classify(lc_sub, m2, right=TRUE)
+
+# Downscale to 100m resolution
+#lc_re_small <- aggregate(lc_re, fact=10, fun="modal")
+lc_re_small <- aggregate(lc_re, fact=10, fun="mean")
+
+lc_re_small_ras <- as(lc_re_small,"Raster")
+
+# Add the modifier
+biomass_sub <- clamp(biomass_sub, upper=100)
+#plot(biomass_sub)
+biomass_modifier <- biomass_sub/100
+plot(biomass_modifier)
+
+
+
+# Mask out non-forest
+just_forest <- ifel(lc_sub_small == 1, 1, NA)
+#plot(just_forest)
+# Match the resolutions
+biomass_modifier <-  resample(biomass_modifier, just_forest)
+# Keep non-forest areas the same too!                      
+biomass_modifier <- mask(biomass_modifier,just_forest, updatevalue=1)
+
+# Take the product
+
+cost_final <- lc_re_small*biomass_modifier
+#plot(lc_osa_final)
+
+cost_final_ras <- as(cost_final,"Raster")
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addRasterImage(lc_re_small_ras, group="Original") %>%
+  addRasterImage(cost_final_ras, group="Modified") %>%
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Original", "Modified")) 
+
+# import mangroves
+mangrove <- vect("data/spatial/WCMC010_MangrovesUSGS2011_v1_4/clipped/mangroves_clipped.shp")
+#rasterise
+mangrove <- rasterize(mangrove, cost_final, 800)
+
+cost_final_mangrove <- cover(mangrove,cost_final)
+
+cost_final_ras <- as(cost_final_mangrove,"Raster")
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addRasterImage(lc_re_small_ras, group="Original") %>%
+  addRasterImage(cost_final_ras, group="Modified") %>%
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Original", "Modified")) 
+
+dir.create("Data/Chapter6/Case_study_4/")
+
+writeRaster(cost_final_ras, "Data/Chapter6/Case_study_4/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+writeRaster(cost_final_ras, "Data/Chapter6/Case_study_4/cost_surface_100m.tif", overwrite=TRUE)
+
+```
+
+```{r, echo=F, eval=F, message=F, warning=F, include=F}
+# Cell map already exists (see chapter 4)
+
+lc <- rast("Data/Chapter6/Case_study_4/cost_surface_100m.tif")
+# lets try a high res circuit scape  
+#start <- focal_pa[focal_pa$NAME=="Corcovado",]
+
+start <- vect("data/spatial/protected_areas/Coastal_protected_areas.shp")
+# Remove marine areas
+
+land_shp <- vect("data/spatial/area_of_interest/aoi.shp")
+start_cropped <- crop(start, land_shp)
+# plot(start_cropped)
+# plot(start, add=T, col="lightblue")
+# plot(test, add=T)
+
+
+  end <- vect("data/spatial/area_of_interest/high_elevation_pas.shp")
+
+# Convert to a spatvect
+start_tmp <- as(start_cropped, "Spatial")
+start_v <- vect(start_tmp)
+end_tmp <- as(end, "Spatial")
+end_v <- vect(end_tmp)
+
+# Add area (for current)
+start$area_km <- round(start_v$GIS_AREA,0)
+#plot(start_v)
+
+
+#start_ras <- rasterize(start_v,lc_re_small, field=1)
+end_ras <- rasterize(end,lc, field=999)
+polygons <- end_ras
+plot(polygons)
+
+# remove the marine area
+start_v$area_km<- start_v$GIS_AREA - start_v$GIS_M_AREA
+
+
+head(start_v)
+start_p <- centroids(start_v, inside=T)
+sources <- rasterize(start_p,lc, 
+             field="area_km") # make the 
+end_p <- centroids(end_v, inside=T)
+grounds <- rasterize(end_p,lc_re_small, 
+             field=1) # make the area the current
+
+
+plot(cost_final_ras)
+plot(start_v, add=T)
+plot(start_p, add=T)
+
+
+# Check the centroid is working
+# plot(start[start$NAME=="Golfo Dulce",])
+# 
+# plot(start_p, add=T, cex=3)
+# #plot(centroids(start_v, inside=T), add=T)
+# plot(sources, add=T, col="pink") 
+            
+lc    <- as(lc,"Raster")
+polygons_ras <- as(polygons,"Raster")
+sources_ras    <- as(sources,"Raster")
+grounds_ras    <- as(grounds,"Raster")
+
+plot(polygons_ras)
+plot(sources_ras)
+plot(grounds_ras)
+
+
+
+
+# Source
+writeRaster(sources_ras, "Data/Chapter6/Case_study_4/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+# Ground
+writeRaster(grounds_ras, "Data/Chapter6/Case_study_4/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+# Polygon
+writeRaster(polygons_ras, "Data/Chapter6/Case_study_4/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+dir.create("Data/Chapter6/Case_study_4/output")
+```
+
+```{r, echo=F, message=F, warning=F}
+# Import the original cost surface
+lc <- rast("Data/Chapter6/Case_study_4/cost_surface_100m.tif")
+
+# Plot the result - TIME TAKEN 6454 seconds - will try with different solver
+res_cur <- rast("Data/Chapter6/Case_study_4/output/Case_study_4_curmap.asc")
+
+start <- vect("data/spatial/protected_areas/Coastal_protected_areas.shp")
+
+
+#plot(res_cur)
+
+res_clamp <- clamp(res_cur, upper=3)
+#plot(res_clamp)
+# Convert the landcover map
+# mask outlow voltage areas
+res_clamp <- app(res_clamp, fun=function(x){ x[x < 0.1] <- NA; return(x)} )
+
+# Add in start nodes
+
+# Add in protect areas (cropped to the area)
+tmp <- crop(start, res_cur)
+start_sf <- sf::st_as_sf(tmp)
+
+#plot(res_clamp)
+final_cur    <- as(res_clamp,"Raster")
+cost    <- as(lc,"Raster")
+
+boundary<- st_as_sfc(st_bbox(final_cur))
+
+pal <- colorNumeric(c("#0C2C84", "#41B6C4", "#FFFFCC"), values(final_cur),
+  na.color = "transparent")
+
+# Add end polygons
+end <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp", quiet=T)
+aoi_sf <- st_as_sfc(st_bbox(cost))
+end_sf <- st_crop(end, aoi_sf)
+
+
+leaflet() %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addProviderTiles("OpenStreetMap", group="OSM") %>%
+  addRasterImage(cost, group="Conductance") %>%
+  addRasterImage(final_cur, group="Current", colors = pal) %>%
+  addPolygons(data=end_sf, fillColor = "red",stroke = F, label=end_sf$NAME, ,fillOpacity = 1) %>% 
+  addLegend(pal = pal, values = values(final_cur),
+    title = "Current flow") %>%
+    addPolygons(data=boundary, fillColor = "yellow",stroke = TRUE, color="red",fillOpacity = 0) %>%
+   addLayersControl(
+    baseGroups = c("Satellite","OSM"),
+    overlayGroups = c("Conductance","Current"))%>% 
+    hideGroup("Conductance") 
+
+
+```
+
+#### Case Study 5: Rio Platano
+The Rio Platano region boasts a great example of a potential climate corridor with some potential for habitat restoration. The large, coastal, Rio Platano Biosphere reserve is connected to high elevation areas in the El Carbon National Park. However, the path must negotiate a blanket of high disturbance around the river Ironia (see the hot white locations below).  
+```{r, include=F, eval=F, echo=F}
+
+##### PREP THE HIGH RESOLUTION LAYER FOR STEP 1
+
+#10.54061994108337, -84.82711654088256
+
+
+library(terra)
+library(raster)
+lc <- rast("data/spatial/landcover/ESACCI-LC-L4-LC10-Map-10m-CAM.tif")
+#Subset to just osa xmin, x max, ymin, ymax
+
+
+#16.113666744523552, -86.05490219261245
+#14.738890836533354, -84.54875873906121
+
+coords <- c(-86.05495, -84.548,
+           15.1588, 16.113666)
+aoi <-  ext(coords)
+lc_sub  <- crop(lc, aoi)
+
+# Downscale it!
+lc_sub_small <- aggregate(lc_sub, fact=10, fun="modal")
+
+# Convert to a raster
+lc_sub_small_ras <- as(lc_sub_small,"Raster")
+colours <- lc_key$rgb
+# Plot it in leaflet
+at <- seq(-0.5, 10.5, 1)
+cb <- colorBin(palette = colours, bins = at, domain = at)
+
+leaflet() %>%
+    addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+    addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+    addRasterImage(lc_sub_small_ras, colors = cb, group="Raster") %>%
+    addLegend(colors = lc_key$rgb, labels=lc_key$LCCOwnLabel)%>% 
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Raster")) 
+
+# Subest the biomass layer
+biomass <- rast("data/spatial/biomass/NASA_biomass_desnity_estimation.tif")
+biomass_sub  <- crop(biomass, aoi)
+biomass_sub_ras  <- as(biomass_sub,"Raster")
+
+
+m2     <- c(0, NA,
+            1, 1000,
+            2, 150,
+            3, 50,
+            4, 60,
+            5, 20,
+            6, 40,
+            7, 10,
+            8, NA,
+            9, NA,
+            10,2
+            )
+m2 <- matrix(m2, ncol=2, byrow = TRUE)
+
+# workflow
+
+  #Import the raster
+  
+  #Reclassify according to my values
+
+  # Then split out rasters for each habitat type and moderate them.
+
+# Reclassify the map
+lc_re <- classify(lc_sub, m2, right=TRUE)
+
+# Downscale to 100m resolution
+#lc_re_small <- aggregate(lc_re, fact=10, fun="modal")
+lc_re_small <- aggregate(lc_re, fact=10, fun="mean")
+
+lc_re_small_ras <- as(lc_re_small,"Raster")
+
+# Add the modifier
+biomass_sub <- clamp(biomass_sub, upper=100)
+#plot(biomass_sub)
+biomass_modifier <- biomass_sub/100
+plot(biomass_modifier)
+
+
+
+# Mask out non-forest
+just_forest <- ifel(lc_sub_small == 1, 1, NA)
+#plot(just_forest)
+# Match the resolutions
+biomass_modifier <-  resample(biomass_modifier, just_forest)
+# Keep non-forest areas the same too!                      
+biomass_modifier <- mask(biomass_modifier,just_forest, updatevalue=1)
+
+# Take the product
+
+cost_final <- lc_re_small*biomass_modifier
+#plot(lc_osa_final)
+
+cost_final_ras <- as(cost_final,"Raster")
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addRasterImage(lc_re_small_ras, group="Original") %>%
+  addRasterImage(cost_final_ras, group="Modified") %>%
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Original", "Modified")) 
+
+# import mangroves
+mangrove <- vect("data/spatial/WCMC010_MangrovesUSGS2011_v1_4/clipped/mangroves_clipped.shp")
+#rasterise
+mangrove <- rasterize(mangrove, cost_final, 800)
+
+cost_final_mangrove <- cover(mangrove,cost_final)
+
+cost_final_ras <- as(cost_final_mangrove,"Raster")
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addRasterImage(lc_re_small_ras, group="Original") %>%
+  addRasterImage(cost_final_ras, group="Modified") %>%
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Original", "Modified")) 
+
+dir.create("Data/Chapter6/Case_study_5/")
+
+writeRaster(cost_final_ras, "Data/Chapter6/Case_study_5/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+writeRaster(cost_final_ras, "Data/Chapter6/Case_study_5/cost_surface_100m.tif", overwrite=TRUE)
+
+```
+
+```{r, echo=F, eval=F, message=F, warning=F, include=F}
+
+lc <- rast("Data/Chapter6/Case_study_5/cost_surface_100m.tif")
+# lets try a high res circuit scape  
+#start <- focal_pa[focal_pa$NAME=="Corcovado",]
+
+start <- vect("data/spatial/protected_areas/Coastal_protected_areas.shp")
+# Remove marine areas
+
+land_shp <- vect("data/spatial/area_of_interest/aoi.shp")
+start_cropped <- crop(start, land_shp)
+# plot(start_cropped)
+# plot(start, add=T, col="lightblue")
+# plot(test, add=T)
+
+
+  end <- vect("data/spatial/area_of_interest/high_elevation_pas.shp")
+
+# Convert to a spatvect
+start_tmp <- as(start_cropped, "Spatial")
+start_v <- vect(start_tmp)
+end_tmp <- as(end, "Spatial")
+end_v <- vect(end_tmp)
+
+# Add area (for current)
+start$area_km <- round(start_v$GIS_AREA,0)
+#plot(start_v)
+
+
+#start_ras <- rasterize(start_v,lc_re_small, field=1)
+end_ras <- rasterize(end,lc, field=999)
+polygons <- end_ras
+plot(polygons)
+
+# remove the marine area
+start_v$area_km<- start_v$GIS_AREA - start_v$GIS_M_AREA
+
+
+head(start_v)
+start_p <- centroids(start_v, inside=T)
+sources <- rasterize(start_p,lc, 
+             field="area_km") # make the 
+end_p <- centroids(end_v, inside=T)
+grounds <- rasterize(end_p,lc_re_small, 
+             field=1) # make the area the current
+
+
+plot(cost_final_ras)
+plot(start_v, add=T)
+plot(start_p, add=T)
+
+
+# Check the centroid is working
+# plot(start[start$NAME=="Golfo Dulce",])
+# 
+# plot(start_p, add=T, cex=3)
+# #plot(centroids(start_v, inside=T), add=T)
+# plot(sources, add=T, col="pink") 
+            
+lc    <- as(lc,"Raster")
+polygons_ras <- as(polygons,"Raster")
+sources_ras    <- as(sources,"Raster")
+grounds_ras    <- as(grounds,"Raster")
+
+plot(polygons_ras)
+plot(sources_ras)
+plot(grounds_ras)
+
+
+
+
+# Source
+writeRaster(sources_ras, "Data/Chapter6/Case_study_5/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+# Ground
+writeRaster(grounds_ras, "Data/Chapter6/Case_study_5/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+# Polygon
+writeRaster(polygons_ras, "Data/Chapter6/Case_study_5/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+dir.create("Data/Chapter6/Case_study_5/output")
+```
+
+```{r, echo=F, message=F, warning=F}
+# Import the original cost surface
+lc <- rast("Data/Chapter6/Case_study_5/cost_surface_100m.tif")
+
+# Plot the result - TIME TAKEN 6454 seconds - will try with different solver
+res_cur <- rast("Data/Chapter6/Case_study_5/output/Case_study_5_curmap.asc")
+
+start <- vect("data/spatial/protected_areas/Coastal_protected_areas.shp")
+
+
+#plot(res_cur)
+
+res_clamp <- clamp(res_cur, upper=20)
+#plot(res_clamp)
+# Convert the landcover map
+# mask outlow voltage areas
+res_clamp <- app(res_clamp, fun=function(x){ x[x < 0.1] <- NA; return(x)} )
+
+# Add in start nodes
+
+# Add in protect areas (cropped to the area)
+tmp <- crop(start, res_cur)
+start_sf <- sf::st_as_sf(tmp)
+
+#plot(res_clamp)
+final_cur    <- as(res_clamp,"Raster")
+cost    <- as(lc,"Raster")
+
+boundary<- st_as_sfc(st_bbox(final_cur))
+
+pal <- colorNumeric(c("#0C2C84", "#41B6C4", "#FFFFCC"), values(final_cur),
+  na.color = "transparent")
+
+# Add end polygons
+end <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp", quiet=T)
+aoi_sf <- st_as_sfc(st_bbox(cost))
+end_sf <- st_crop(end, aoi_sf)
+
+
+leaflet() %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addProviderTiles("OpenStreetMap", group="OSM") %>%
+  addRasterImage(cost, group="Conductance") %>%
+  addRasterImage(final_cur, group="Current", colors = pal) %>%
+  addPolygons(data=end_sf, fillColor = "red",stroke = F, label=end_sf$NAME, ,fillOpacity = 1) %>% 
+  addLegend(pal = pal, values = values(final_cur),
+    title = "Current flow") %>%
+    addPolygons(data=boundary, fillColor = "yellow",stroke = TRUE, color="red",fillOpacity = 0) %>%
+   addLayersControl(
+    baseGroups = c("Satellite","OSM"),
+    overlayGroups = c("Conductance","Current"))%>% 
+    hideGroup("Conductance") 
+
+
+```
+
+#### Case Study 6: Indio Maiz
+This location has the potential to connect the lowland Indio Maiz Biological reserve [Nicaragua], Refugio Barro del Colorado [Costa Rica], and Tortuguero [Costa Rica], with the highland areas of Braulio Carrillo National Park, Cordillera Volcánica Central and Juan Castro Blanco. Viewing the map below, it is clear that there are two potential corridors, one linking Indio Maiz with Braulio Carrillo, and a second linking Tortugero with Cordillera Volcánica. Both corridors are incomplete, and pass through some highly disturbed areas. This is a great example of a landscape which could benefit from restoration. 
+
+
+```{r, include=F, eval=F, echo=F}
+
+##### PREP THE HIGH RESOLUTION LAYER FOR STEP 1
+
+library(terra)
+library(raster)
+lc <- rast("data/spatial/landcover/ESACCI-LC-L4-LC10-Map-10m-CAM.tif")
+#Subset to just osa xmin, x max, ymin, ymax
+
+
+#11.081494734345494, -84.51627368049894
+# 9.967381770561309, -83.4210192860748
+
+coords <- c(-84.516, -83.421,
+           9.967, 11.214)
+aoi <-  ext(coords)
+lc_sub  <- crop(lc, aoi)
+
+# Downscale it!
+lc_sub_small <- aggregate(lc_sub, fact=10, fun="modal")
+
+# Convert to a raster
+lc_sub_small_ras <- as(lc_sub_small,"Raster")
+colours <- lc_key$rgb
+# Plot it in leaflet
+at <- seq(-0.5, 10.5, 1)
+cb <- colorBin(palette = colours, bins = at, domain = at)
+
+leaflet() %>%
+    addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+    addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+    addRasterImage(lc_sub_small_ras, colors = cb, group="Raster") %>%
+    addLegend(colors = lc_key$rgb, labels=lc_key$LCCOwnLabel)%>% 
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Raster")) 
+
+# Subest the biomass layer
+biomass <- rast("data/spatial/biomass/NASA_biomass_desnity_estimation.tif")
+biomass_sub  <- crop(biomass, aoi)
+biomass_sub_ras  <- as(biomass_sub,"Raster")
+
+
+m2     <- c(0, NA,
+            1, 1000,
+            2, 150,
+            3, 50,
+            4, 60,
+            5, 20,
+            6, 40,
+            7, 10,
+            8, NA,
+            9, NA,
+            10,2
+            )
+m2 <- matrix(m2, ncol=2, byrow = TRUE)
+
+# workflow
+
+  #Import the raster
+  
+  #Reclassify according to my values
+
+  # Then split out rasters for each habitat type and moderate them.
+
+# Reclassify the map
+lc_re <- classify(lc_sub, m2, right=TRUE)
+
+# Downscale to 100m resolution
+#lc_re_small <- aggregate(lc_re, fact=10, fun="modal")
+lc_re_small <- aggregate(lc_re, fact=10, fun="mean")
+
+lc_re_small_ras <- as(lc_re_small,"Raster")
+
+# Add the modifier
+biomass_sub <- clamp(biomass_sub, upper=100)
+#plot(biomass_sub)
+biomass_modifier <- biomass_sub/100
+plot(biomass_modifier)
+
+
+
+# Mask out non-forest
+just_forest <- ifel(lc_sub_small == 1, 1, NA)
+#plot(just_forest)
+# Match the resolutions
+biomass_modifier <-  resample(biomass_modifier, just_forest)
+# Keep non-forest areas the same too!                      
+biomass_modifier <- mask(biomass_modifier,just_forest, updatevalue=1)
+
+# Take the product
+
+cost_final <- lc_re_small*biomass_modifier
+#plot(lc_osa_final)
+
+cost_final_ras <- as(cost_final,"Raster")
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addRasterImage(lc_re_small_ras, group="Original") %>%
+  addRasterImage(cost_final_ras, group="Modified") %>%
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Original", "Modified")) 
+
+# import mangroves
+mangrove <- vect("data/spatial/WCMC010_MangrovesUSGS2011_v1_4/clipped/mangroves_clipped.shp")
+#rasterise
+mangrove <- rasterize(mangrove, cost_final, 800)
+
+cost_final_mangrove <- cover(mangrove,cost_final)
+
+cost_final_ras <- as(cost_final_mangrove,"Raster")
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addRasterImage(lc_re_small_ras, group="Original") %>%
+  addRasterImage(cost_final_ras, group="Modified") %>%
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Original", "Modified")) 
+
+dir.create("Data/Chapter6/Case_study_6/")
+
+writeRaster(cost_final_ras, "Data/Chapter6/Case_study_6/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+writeRaster(cost_final_ras, "Data/Chapter6/Case_study_6/cost_surface_100m.tif", overwrite=TRUE)
+
+```
+
+```{r, echo=F, eval=F, message=F, warning=F, include=F}
+
+lc <- rast("Data/Chapter6/Case_study_6/cost_surface_100m.tif")
+# lets try a high res circuit scape  
+#start <- focal_pa[focal_pa$NAME=="Corcovado",]
+
+start <- vect("data/spatial/protected_areas/Coastal_protected_areas.shp")
+# Remove marine areas
+
+land_shp <- vect("data/spatial/area_of_interest/aoi.shp")
+start_cropped <- crop(start, land_shp)
+# plot(start_cropped)
+# plot(start, add=T, col="lightblue")
+# plot(test, add=T)
+
+
+  end <- vect("data/spatial/area_of_interest/high_elevation_pas.shp")
+
+# Convert to a spatvect
+start_tmp <- as(start_cropped, "Spatial")
+start_v <- vect(start_tmp)
+end_tmp <- as(end, "Spatial")
+end_v <- vect(end_tmp)
+
+# Add area (for current)
+start$area_km <- round(start_v$GIS_AREA,0)
+#plot(start_v)
+
+
+#start_ras <- rasterize(start_v,lc_re_small, field=1)
+end_ras <- rasterize(end,lc, field=999)
+polygons <- end_ras
+plot(polygons)
+
+# remove the marine area
+start_v$area_km<- start_v$GIS_AREA - start_v$GIS_M_AREA
+
+
+head(start_v)
+start_p <- centroids(start_v, inside=T)
+sources <- rasterize(start_p,lc, 
+             field="area_km") # make the 
+end_p <- centroids(end_v, inside=T)
+grounds <- rasterize(end_p,lc_re_small, 
+             field=1) # make the area the current
+
+
+plot(cost_final_ras)
+plot(start_v, add=T)
+plot(start_p, add=T)
+plot(end_v, add=T, col="red")
+
+
+# Check the centroid is working
+# plot(start[start$NAME=="Golfo Dulce",])
+# 
+# plot(start_p, add=T, cex=3)
+# #plot(centroids(start_v, inside=T), add=T)
+# plot(sources, add=T, col="pink") 
+            
+lc    <- as(lc,"Raster")
+polygons_ras <- as(polygons,"Raster")
+sources_ras    <- as(sources,"Raster")
+grounds_ras    <- as(grounds,"Raster")
+
+plot(polygons_ras)
+plot(sources_ras)
+plot(grounds_ras)
+
+
+
+
+# Source
+writeRaster(sources_ras, "Data/Chapter6/Case_study_6/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+# Ground
+writeRaster(grounds_ras, "Data/Chapter6/Case_study_6/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+# Polygon
+writeRaster(polygons_ras, "Data/Chapter6/Case_study_6/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+dir.create("Data/Chapter6/Case_study_6/output")
+```
+
+```{r, echo=F, message=F, warning=F}
+# Import the original cost surface
+lc <- rast("Data/Chapter6/Case_study_6/cost_surface_100m.tif")
+
+# Plot the result - TIME TAKEN 6454 seconds - will try with different solver
+res_cur <- rast("Data/Chapter6/Case_study_6/output/Case_study_6_curmap.asc")
+
+start <- vect("data/spatial/protected_areas/Coastal_protected_areas.shp")
+
+
+#plot(res_cur)
+
+res_clamp <- clamp(res_cur, upper=15)
+#plot(res_clamp)
+# Convert the landcover map
+# mask outlow voltage areas
+res_clamp <- app(res_clamp, fun=function(x){ x[x < 0.1] <- NA; return(x)} )
+
+# Add in start nodes
+
+# Add in protect areas (cropped to the area)
+tmp <- crop(start, res_cur)
+start_sf <- sf::st_as_sf(tmp)
+
+#plot(res_clamp)
+final_cur    <- as(res_clamp,"Raster")
+cost    <- as(lc,"Raster")
+
+boundary<- st_as_sfc(st_bbox(final_cur))
+
+pal <- colorNumeric(c("#0C2C84", "#41B6C4", "#FFFFCC"), values(final_cur),
+  na.color = "transparent")
+
+# Add end polygons
+end <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp", quiet=T)
+aoi_sf <- st_as_sfc(st_bbox(cost))
+end_sf <- st_crop(end, aoi_sf)
+
+
+leaflet() %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addProviderTiles("OpenStreetMap", group="OSM") %>%
+  addRasterImage(cost, group="Conductance") %>%
+  addRasterImage(final_cur, group="Current", colors = pal) %>%
+  addPolygons(data=end_sf, fillColor = "red",stroke = F, label=end_sf$NAME, ,fillOpacity = 1) %>% 
+  addLegend(pal = pal, values = values(final_cur),
+    title = "Current flow") %>%
+    addPolygons(data=boundary, fillColor = "yellow",stroke = TRUE, color="red",fillOpacity = 0) %>%
+   addLayersControl(
+    baseGroups = c("Satellite","OSM"),
+    overlayGroups = c("Conductance","Current"))%>% 
+    hideGroup("Conductance") 
+
+
+```
+
+
+#### Case Study 7: Limon
+In the Limon landscape, the relatively small Gandoca Manzanillo wildlife refuge and Humedal de San San Pond Sak are linked with the high elevation areas in La Amistad. The landscape is relatively well protected, aside from a thin strip of high disturbance around the border between Panama and Costa Rica. Given the trans boundary nature of this landscape, coordinating restoration initiatives may be tricky. 
+
+
+```{r, include=F, eval=F, echo=F}
+
+##### PREP THE HIGH RESOLUTION LAYER FOR STEP 1
+
+library(terra)
+library(raster)
+lc <- rast("data/spatial/landcover/ESACCI-LC-L4-LC10-Map-10m-CAM.tif")
+#Subset to just osa xmin, x max, ymin, ymax
+
+
+#10.259625067763507, -83.26708086692763
+# 9.222488413452034, -82.68934687498087
+
+coords <- c(-83.367, -82.289,
+           9.022, 10.2596)
+aoi <-  ext(coords)
+lc_sub  <- crop(lc, aoi)
+
+# Downscale it!
+lc_sub_small <- aggregate(lc_sub, fact=10, fun="modal")
+
+# Convert to a raster
+lc_sub_small_ras <- as(lc_sub_small,"Raster")
+colours <- lc_key$rgb
+# Plot it in leaflet
+at <- seq(-0.5, 10.5, 1)
+cb <- colorBin(palette = colours, bins = at, domain = at)
+
+leaflet() %>%
+    addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+    addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+    addRasterImage(lc_sub_small_ras, colors = cb, group="Raster") %>%
+    addLegend(colors = lc_key$rgb, labels=lc_key$LCCOwnLabel)%>% 
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Raster")) 
+
+# Subest the biomass layer
+biomass <- rast("data/spatial/biomass/NASA_biomass_desnity_estimation.tif")
+biomass_sub  <- crop(biomass, aoi)
+biomass_sub_ras  <- as(biomass_sub,"Raster")
+
+
+m2     <- c(0, NA,
+            1, 1000,
+            2, 150,
+            3, 50,
+            4, 60,
+            5, 20,
+            6, 40,
+            7, 10,
+            8, NA,
+            9, NA,
+            10,2
+            )
+m2 <- matrix(m2, ncol=2, byrow = TRUE)
+
+# workflow
+
+  #Import the raster
+  
+  #Reclassify according to my values
+
+  # Then split out rasters for each habitat type and moderate them.
+
+# Reclassify the map
+lc_re <- classify(lc_sub, m2, right=TRUE)
+
+# Downscale to 100m resolution
+#lc_re_small <- aggregate(lc_re, fact=10, fun="modal")
+lc_re_small <- aggregate(lc_re, fact=10, fun="mean")
+
+lc_re_small_ras <- as(lc_re_small,"Raster")
+
+# Add the modifier
+biomass_sub <- clamp(biomass_sub, upper=100)
+#plot(biomass_sub)
+biomass_modifier <- biomass_sub/100
+plot(biomass_modifier)
+
+
+
+# Mask out non-forest
+just_forest <- ifel(lc_sub_small == 1, 1, NA)
+#plot(just_forest)
+# Match the resolutions
+biomass_modifier <-  resample(biomass_modifier, just_forest)
+# Keep non-forest areas the same too!                      
+biomass_modifier <- mask(biomass_modifier,just_forest, updatevalue=1)
+
+# Take the product
+
+cost_final <- lc_re_small*biomass_modifier
+#plot(lc_osa_final)
+
+cost_final_ras <- as(cost_final,"Raster")
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addRasterImage(lc_re_small_ras, group="Original") %>%
+  addRasterImage(cost_final_ras, group="Modified") %>%
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Original", "Modified")) 
+
+# import mangroves
+mangrove <- vect("data/spatial/WCMC010_MangrovesUSGS2011_v1_4/clipped/mangroves_clipped.shp")
+#rasterise
+mangrove <- rasterize(mangrove, cost_final, 800)
+
+cost_final_mangrove <- cover(mangrove,cost_final)
+
+cost_final_ras <- as(cost_final_mangrove,"Raster")
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addRasterImage(lc_re_small_ras, group="Original") %>%
+  addRasterImage(cost_final_ras, group="Modified") %>%
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Original", "Modified")) 
+
+dir.create("Data/Chapter6/Case_study_7/")
+
+writeRaster(cost_final_ras, "Data/Chapter6/Case_study_7/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+writeRaster(cost_final_ras, "Data/Chapter6/Case_study_7/cost_surface_100m.tif", overwrite=TRUE)
+
+```
+
+```{r, echo=F, eval=F, message=F, warning=F, include=F}
+
+lc <- rast("Data/Chapter6/Case_study_7/cost_surface_100m.tif")
+# lets try a high res circuit scape  
+#start <- focal_pa[focal_pa$NAME=="Corcovado",]
+
+start <- vect("data/spatial/protected_areas/Coastal_protected_areas.shp")
+# Remove marine areas
+
+land_shp <- vect("data/spatial/area_of_interest/aoi.shp")
+start_cropped <- crop(start, land_shp)
+# plot(start_cropped)
+# plot(start, add=T, col="lightblue")
+# plot(test, add=T)
+
+
+  end <- vect("data/spatial/area_of_interest/high_elevation_pas.shp")
+
+# Convert to a spatvect
+start_tmp <- as(start_cropped, "Spatial")
+start_v <- vect(start_tmp)
+end_tmp <- as(end, "Spatial")
+end_v <- vect(end_tmp)
+
+# Add area (for current)
+start$area_km <- round(start_v$GIS_AREA,0)
+#plot(start_v)
+
+
+#start_ras <- rasterize(start_v,lc_re_small, field=1)
+end_ras <- rasterize(end,lc, field=999)
+polygons <- end_ras
+plot(polygons)
+
+# remove the marine area
+start_v$area_km<- start_v$GIS_AREA - start_v$GIS_M_AREA
+
+
+head(start_v)
+start_p <- centroids(start_v, inside=T)
+sources <- rasterize(start_p,lc, 
+             field="area_km") # make the 
+end_p <- centroids(end_v, inside=T)
+grounds <- rasterize(end_p,lc_re_small, 
+             field=1) # make the area the current
+
+
+plot(cost_final_ras)
+plot(start_v, add=T)
+plot(start_p, add=T)
+plot(end_v, add=T, col="red")
+
+
+# Check the centroid is working
+# plot(start[start$NAME=="Golfo Dulce",])
+# 
+# plot(start_p, add=T, cex=3)
+# #plot(centroids(start_v, inside=T), add=T)
+# plot(sources, add=T, col="pink") 
+            
+lc    <- as(lc,"Raster")
+polygons_ras <- as(polygons,"Raster")
+sources_ras    <- as(sources,"Raster")
+grounds_ras    <- as(grounds,"Raster")
+
+plot(polygons_ras)
+plot(sources_ras)
+plot(grounds_ras)
+
+
+
+
+# Source
+writeRaster(sources_ras, "Data/Chapter6/Case_study_7/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+# Ground
+writeRaster(grounds_ras, "Data/Chapter6/Case_study_7/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+# Polygon
+writeRaster(polygons_ras, "Data/Chapter6/Case_study_7/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+dir.create("Data/Chapter6/Case_study_7/output")
+```
+
+```{r, echo=F, message=F, warning=F}
+# Import the original cost surface
+lc <- rast("Data/Chapter6/Case_study_7/cost_surface_100m.tif")
+
+# Plot the result - TIME TAKEN 6454 seconds - will try with different solver
+res_cur <- rast("Data/Chapter6/Case_study_7/output/Case_study_7_curmap.asc")
+
+start <- vect("data/spatial/protected_areas/Coastal_protected_areas.shp")
+
+
+#plot(res_cur)
+
+res_clamp <- clamp(res_cur, upper=5)
+#plot(res_clamp)
+# Convert the landcover map
+# mask outlow voltage areas
+res_clamp <- app(res_clamp, fun=function(x){ x[x < 0.1] <- NA; return(x)} )
+
+# Add in start nodes
+
+# Add in protect areas (cropped to the area)
+tmp <- crop(start, res_cur)
+start_sf <- sf::st_as_sf(tmp)
+
+#plot(res_clamp)
+final_cur    <- as(res_clamp,"Raster")
+cost    <- as(lc,"Raster")
+
+boundary<- st_as_sfc(st_bbox(final_cur))
+
+pal <- colorNumeric(c("#0C2C84", "#41B6C4", "#FFFFCC"), values(final_cur),
+  na.color = "transparent")
+
+# Add end polygons
+end <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp", quiet=T)
+aoi_sf <- st_as_sfc(st_bbox(cost))
+end_sf <- st_crop(end, aoi_sf)
+
+
+leaflet() %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addProviderTiles("OpenStreetMap", group="OSM") %>%
+  addRasterImage(cost, group="Conductance") %>%
+  addRasterImage(final_cur, group="Current", colors = pal) %>%
+  addPolygons(data=end_sf, fillColor = "red",stroke = F, label=end_sf$NAME, ,fillOpacity = 1) %>% 
+  addLegend(pal = pal, values = values(final_cur),
+    title = "Current flow") %>%
+    addPolygons(data=boundary, fillColor = "yellow",stroke = TRUE, color="red",fillOpacity = 0) %>%
+   addLayersControl(
+    baseGroups = c("Satellite","OSM"),
+    overlayGroups = c("Conductance","Current"))%>% 
+    hideGroup("Conductance") 
+
+
+```
+
+#### Case Study 8: Manglares
+In this landscape the Humedal de Importancia Internacional Damani-Guariviara lowland protected area is linked up to Reserva Forestal Fortuna, which is part of the La Amistad region. The corridor to the high elevation forest is not clear, and there is substantial human disturbance across the landscape.  
+
+
+```{r, include=F, eval=F, echo=F}
+
+##### PREP THE HIGH RESOLUTION LAYER FOR STEP 1
+
+library(terra)
+library(raster)
+lc <- rast("data/spatial/landcover/ESACCI-LC-L4-LC10-Map-10m-CAM.tif")
+#Subset to just osa xmin, x max, ymin, ymax
+
+
+#9.223470903501594, -82.32297660091719
+# 8.493025436392463, -81.56691146648393
+
+coords <- c(-82.622,-81.566,
+          8.4930, 9.2234)
+aoi <-  ext(coords)
+lc_sub  <- crop(lc, aoi)
+
+# Downscale it!
+lc_sub_small <- aggregate(lc_sub, fact=10, fun="modal")
+
+# Convert to a raster
+lc_sub_small_ras <- as(lc_sub_small,"Raster")
+colours <- lc_key$rgb
+# Plot it in leaflet
+at <- seq(-0.5, 10.5, 1)
+cb <- colorBin(palette = colours, bins = at, domain = at)
+
+leaflet() %>%
+    addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+    addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+    addRasterImage(lc_sub_small_ras, colors = cb, group="Raster") %>%
+    addLegend(colors = lc_key$rgb, labels=lc_key$LCCOwnLabel)%>% 
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Raster")) 
+
+# Subest the biomass layer
+biomass <- rast("data/spatial/biomass/NASA_biomass_desnity_estimation.tif")
+biomass_sub  <- crop(biomass, aoi)
+biomass_sub_ras  <- as(biomass_sub,"Raster")
+
+
+m2     <- c(0, NA,
+            1, 1000,
+            2, 150,
+            3, 50,
+            4, 60,
+            5, 20,
+            6, 40,
+            7, 10,
+            8, NA,
+            9, NA,
+            10,2
+            )
+m2 <- matrix(m2, ncol=2, byrow = TRUE)
+
+# workflow
+
+  #Import the raster
+  
+  #Reclassify according to my values
+
+  # Then split out rasters for each habitat type and moderate them.
+
+# Reclassify the map
+lc_re <- classify(lc_sub, m2, right=TRUE)
+
+# Downscale to 100m resolution
+#lc_re_small <- aggregate(lc_re, fact=10, fun="modal")
+lc_re_small <- aggregate(lc_re, fact=10, fun="mean")
+
+lc_re_small_ras <- as(lc_re_small,"Raster")
+
+# Add the modifier
+biomass_sub <- clamp(biomass_sub, upper=100)
+#plot(biomass_sub)
+biomass_modifier <- biomass_sub/100
+plot(biomass_modifier)
+
+
+
+# Mask out non-forest
+just_forest <- ifel(lc_sub_small == 1, 1, NA)
+#plot(just_forest)
+# Match the resolutions
+biomass_modifier <-  resample(biomass_modifier, just_forest)
+# Keep non-forest areas the same too!                      
+biomass_modifier <- mask(biomass_modifier,just_forest, updatevalue=1)
+
+# Take the product
+
+cost_final <- lc_re_small*biomass_modifier
+#plot(lc_osa_final)
+
+cost_final_ras <- as(cost_final,"Raster")
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addRasterImage(lc_re_small_ras, group="Original") %>%
+  addRasterImage(cost_final_ras, group="Modified") %>%
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Original", "Modified")) 
+
+# import mangroves
+mangrove <- vect("data/spatial/WCMC010_MangrovesUSGS2011_v1_4/clipped/mangroves_clipped.shp")
+#rasterise
+mangrove <- rasterize(mangrove, cost_final, 800)
+
+cost_final_mangrove <- cover(mangrove,cost_final)
+
+cost_final_ras <- as(cost_final_mangrove,"Raster")
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addRasterImage(lc_re_small_ras, group="Original") %>%
+  addRasterImage(cost_final_ras, group="Modified") %>%
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Original", "Modified")) 
+
+dir.create("Data/Chapter6/Case_study_8/")
+
+writeRaster(cost_final_ras, "Data/Chapter6/Case_study_8/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+writeRaster(cost_final_ras, "Data/Chapter6/Case_study_8/cost_surface_100m.tif", overwrite=TRUE)
+
+```
+
+```{r, echo=F, eval=F, message=F, warning=F, include=F}
+
+lc <- rast("Data/Chapter6/Case_study_8/cost_surface_100m.tif")
+# lets try a high res circuit scape  
+#start <- focal_pa[focal_pa$NAME=="Corcovado",]
+
+start <- vect("data/spatial/protected_areas/Coastal_protected_areas.shp")
+# Remove marine areas
+
+land_shp <- vect("data/spatial/area_of_interest/aoi.shp")
+start_cropped <- crop(start, land_shp)
+# plot(start_cropped)
+# plot(start, add=T, col="lightblue")
+# plot(test, add=T)
+
+
+  end <- vect("data/spatial/area_of_interest/high_elevation_pas.shp")
+
+# Convert to a spatvect
+start_tmp <- as(start_cropped, "Spatial")
+start_v <- vect(start_tmp)
+end_tmp <- as(end, "Spatial")
+end_v <- vect(end_tmp)
+
+# Add area (for current)
+start$area_km <- round(start_v$GIS_AREA,0)
+#plot(start_v)
+
+
+#start_ras <- rasterize(start_v,lc_re_small, field=1)
+end_ras <- rasterize(end,lc, field=999)
+polygons <- end_ras
+plot(polygons)
+
+# remove the marine area
+start_v$area_km<- start_v$GIS_AREA - start_v$GIS_M_AREA
+
+
+head(start_v)
+start_p <- centroids(start_v, inside=T)
+sources <- rasterize(start_p,lc, 
+             field="area_km") # make the 
+end_p <- centroids(end_v, inside=T)
+grounds <- rasterize(end_p,lc_re_small, 
+             field=1) # make the area the current
+
+
+plot(cost_final_ras)
+plot(start_v, add=T)
+plot(start_p, add=T)
+plot(end_v, add=T, col="red")
+
+
+# Check the centroid is working
+# plot(start[start$NAME=="Golfo Dulce",])
+# 
+# plot(start_p, add=T, cex=3)
+# #plot(centroids(start_v, inside=T), add=T)
+# plot(sources, add=T, col="pink") 
+            
+lc    <- as(lc,"Raster")
+polygons_ras <- as(polygons,"Raster")
+sources_ras    <- as(sources,"Raster")
+grounds_ras    <- as(grounds,"Raster")
+
+plot(polygons_ras)
+plot(sources_ras)
+plot(grounds_ras)
+
+
+
+
+# Source
+writeRaster(sources_ras, "Data/Chapter6/Case_study_8/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+# Ground
+writeRaster(grounds_ras, "Data/Chapter6/Case_study_8/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+# Polygon
+writeRaster(polygons_ras, "Data/Chapter6/Case_study_8/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+dir.create("Data/Chapter6/Case_study_8/output")
+```
+
+```{r, echo=F, message=F, warning=F}
+# Import the original cost surface
+lc <- rast("Data/Chapter6/Case_study_8/cost_surface_100m.tif")
+
+# Plot the result - TIME TAKEN 6454 seconds - will try with different solver
+res_cur <- rast("Data/Chapter6/Case_study_8/output/Case_study_8_curmap.asc")
+
+start <- vect("data/spatial/protected_areas/Coastal_protected_areas.shp")
+
+
+#plot(res_cur)
+
+res_clamp <- clamp(res_cur, upper=10)
+#plot(res_clamp)
+# Convert the landcover map
+# mask outlow voltage areas
+res_clamp <- app(res_clamp, fun=function(x){ x[x < 0.1] <- NA; return(x)} )
+
+# Add in start nodes
+
+# Add in protect areas (cropped to the area)
+tmp <- crop(start, res_cur)
+start_sf <- sf::st_as_sf(tmp)
+
+#plot(res_clamp)
+final_cur    <- as(res_clamp,"Raster")
+cost    <- as(lc,"Raster")
+
+boundary<- st_as_sfc(st_bbox(final_cur))
+
+pal <- colorNumeric(c("#0C2C84", "#41B6C4", "#FFFFCC"), values(final_cur),
+  na.color = "transparent")
+
+# Add end polygons
+end <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp", quiet=T)
+aoi_sf <- st_as_sfc(st_bbox(cost))
+end_sf <- st_crop(end, aoi_sf)
+
+
+leaflet() %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addProviderTiles("OpenStreetMap", group="OSM") %>%
+  addRasterImage(cost, group="Conductance") %>%
+  addRasterImage(final_cur, group="Current", colors = pal) %>%
+  addPolygons(data=end_sf, fillColor = "red",stroke = F, label=end_sf$NAME, ,fillOpacity = 1) %>% 
+  addLegend(pal = pal, values = values(final_cur),
+    title = "Current flow") %>%
+    addPolygons(data=boundary, fillColor = "yellow",stroke = TRUE, color="red",fillOpacity = 0) %>%
+   addLayersControl(
+    baseGroups = c("Satellite","OSM"),
+    overlayGroups = c("Conductance","Current"))%>% 
+    hideGroup("Conductance") 
+
+
+```
+
+
+#### Case Study 9: Sante Fe
+This case study location is interesting. The lowland park referred to is Donoso multiple use area, and the highlands it connects to are relatively small, near the Parque Nacional Omar Torrijos. It is interesting as the protected was proposed to be declassified in June 2022. As such, its status as a climate corridor is in question, particularly given the low protected status of multiple use areas. 
+
+
+```{r, include=F, eval=F, echo=F}
+
+##### PREP THE HIGH RESOLUTION LAYER FOR STEP 1
+
+library(terra)
+library(raster)
+lc <- rast("data/spatial/landcover/ESACCI-LC-L4-LC10-Map-10m-CAM.tif")
+#Subset to just osa xmin, x max, ymin, ymax
+
+
+#9.196962962664648, -81.3633288122517
+# 8.251890922632757, -79.69671784560464
+
+coords <- c(-81.363,-79.696,
+          8.251, 9.1969)
+aoi <-  ext(coords)
+lc_sub  <- crop(lc, aoi)
+
+# Downscale it!
+lc_sub_small <- aggregate(lc_sub, fact=10, fun="modal")
+
+# Convert to a raster
+lc_sub_small_ras <- as(lc_sub_small,"Raster")
+colours <- lc_key$rgb
+# Plot it in leaflet
+at <- seq(-0.5, 10.5, 1)
+cb <- colorBin(palette = colours, bins = at, domain = at)
+
+leaflet() %>%
+    addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+    addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+    addRasterImage(lc_sub_small_ras, colors = cb, group="Raster") %>%
+    addLegend(colors = lc_key$rgb, labels=lc_key$LCCOwnLabel)%>% 
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Raster")) 
+
+# Subest the biomass layer
+biomass <- rast("data/spatial/biomass/NASA_biomass_desnity_estimation.tif")
+biomass_sub  <- crop(biomass, aoi)
+biomass_sub_ras  <- as(biomass_sub,"Raster")
+
+
+m2     <- c(0, NA,
+            1, 1000,
+            2, 150,
+            3, 50,
+            4, 60,
+            5, 20,
+            6, 40,
+            7, 10,
+            8, NA,
+            9, NA,
+            10,2
+            )
+m2 <- matrix(m2, ncol=2, byrow = TRUE)
+
+# workflow
+
+  #Import the raster
+  
+  #Reclassify according to my values
+
+  # Then split out rasters for each habitat type and moderate them.
+
+# Reclassify the map
+lc_re <- classify(lc_sub, m2, right=TRUE)
+
+# Downscale to 100m resolution
+#lc_re_small <- aggregate(lc_re, fact=10, fun="modal")
+lc_re_small <- aggregate(lc_re, fact=10, fun="mean")
+
+lc_re_small_ras <- as(lc_re_small,"Raster")
+
+# Add the modifier
+biomass_sub <- clamp(biomass_sub, upper=100)
+#plot(biomass_sub)
+biomass_modifier <- biomass_sub/100
+plot(biomass_modifier)
+
+
+
+# Mask out non-forest
+just_forest <- ifel(lc_sub_small == 1, 1, NA)
+#plot(just_forest)
+# Match the resolutions
+biomass_modifier <-  resample(biomass_modifier, just_forest)
+# Keep non-forest areas the same too!                      
+biomass_modifier <- mask(biomass_modifier,just_forest, updatevalue=1)
+
+# Take the product
+
+cost_final <- lc_re_small*biomass_modifier
+#plot(lc_osa_final)
+
+cost_final_ras <- as(cost_final,"Raster")
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addRasterImage(lc_re_small_ras, group="Original") %>%
+  addRasterImage(cost_final_ras, group="Modified") %>%
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Original", "Modified")) 
+
+# import mangroves
+mangrove <- vect("data/spatial/WCMC010_MangrovesUSGS2011_v1_4/clipped/mangroves_clipped.shp")
+#rasterise
+mangrove <- rasterize(mangrove, cost_final, 800)
+
+cost_final_mangrove <- cover(mangrove,cost_final)
+
+cost_final_ras <- as(cost_final_mangrove,"Raster")
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addRasterImage(lc_re_small_ras, group="Original") %>%
+  addRasterImage(cost_final_ras, group="Modified") %>%
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Original", "Modified")) 
+
+dir.create("Data/Chapter6/Case_study_9/")
+
+writeRaster(cost_final_ras, "Data/Chapter6/Case_study_9/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+writeRaster(cost_final_ras, "Data/Chapter6/Case_study_9/cost_surface_100m.tif", overwrite=TRUE)
+
+```
+
+```{r, echo=F, eval=F, message=F, warning=F, include=F}
+
+lc <- rast("Data/Chapter6/Case_study_9/cost_surface_100m.tif")
+# lets try a high res circuit scape  
+#start <- focal_pa[focal_pa$NAME=="Corcovado",]
+
+start <- vect("data/spatial/protected_areas/Coastal_protected_areas.shp")
+# Remove marine areas
+
+land_shp <- vect("data/spatial/area_of_interest/aoi.shp")
+start_cropped <- crop(start, land_shp)
+# plot(start_cropped)
+# plot(start, add=T, col="lightblue")
+# plot(test, add=T)
+
+
+  end <- vect("data/spatial/area_of_interest/high_elevation_pas.shp")
+
+# Convert to a spatvect
+start_tmp <- as(start_cropped, "Spatial")
+start_v <- vect(start_tmp)
+end_tmp <- as(end, "Spatial")
+end_v <- vect(end_tmp)
+
+# Add area (for current)
+start$area_km <- round(start_v$GIS_AREA,0)
+#plot(start_v)
+
+
+#start_ras <- rasterize(start_v,lc_re_small, field=1)
+end_ras <- rasterize(end,lc, field=999)
+polygons <- end_ras
+plot(polygons)
+
+# remove the marine area
+start_v$area_km<- start_v$GIS_AREA - start_v$GIS_M_AREA
+
+
+head(start_v)
+start_p <- centroids(start_v, inside=T)
+sources <- rasterize(start_p,lc, 
+             field="area_km") # make the 
+end_p <- centroids(end_v, inside=T)
+grounds <- rasterize(end_p,lc_re_small, 
+             field=1) # make the area the current
+
+
+plot(cost_final_ras)
+plot(start_v, add=T)
+plot(start_p, add=T)
+plot(end_v, add=T, col="red")
+
+
+# Check the centroid is working
+# plot(start[start$NAME=="Golfo Dulce",])
+# 
+# plot(start_p, add=T, cex=3)
+# #plot(centroids(start_v, inside=T), add=T)
+# plot(sources, add=T, col="pink") 
+            
+lc    <- as(lc,"Raster")
+polygons_ras <- as(polygons,"Raster")
+sources_ras    <- as(sources,"Raster")
+grounds_ras    <- as(grounds,"Raster")
+
+plot(polygons_ras)
+plot(sources_ras)
+plot(grounds_ras)
+
+
+
+
+# Source
+writeRaster(sources_ras, "Data/Chapter6/Case_study_9/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+# Ground
+writeRaster(grounds_ras, "Data/Chapter6/Case_study_9/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+# Polygon
+writeRaster(polygons_ras, "Data/Chapter6/Case_study_9/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+dir.create("Data/Chapter6/Case_study_9/output")
+```
+
+```{r, echo=F, message=F, warning=F}
+# Import the original cost surface
+lc <- rast("Data/Chapter6/Case_study_9/cost_surface_100m.tif")
+
+# Plot the result - TIME TAKEN 6454 seconds - will try with different solver
+res_cur <- rast("Data/Chapter6/Case_study_9/output/Case_study_9_curmap.asc")
+
+start <- vect("data/spatial/protected_areas/Coastal_protected_areas.shp")
+
+
+#plot(res_cur)
+
+res_clamp <- clamp(res_cur, upper=10)
+#plot(res_clamp)
+# Convert the landcover map
+# mask outlow voltage areas
+res_clamp <- app(res_clamp, fun=function(x){ x[x < 0.1] <- NA; return(x)} )
+
+# Add in start nodes
+
+# Add in protect areas (cropped to the area)
+tmp <- crop(start, res_cur)
+start_sf <- sf::st_as_sf(tmp)
+
+#plot(res_clamp)
+final_cur    <- as(res_clamp,"Raster")
+cost    <- as(lc,"Raster")
+
+boundary<- st_as_sfc(st_bbox(final_cur))
+
+pal <- colorNumeric(c("#0C2C84", "#41B6C4", "#FFFFCC"), values(final_cur),
+  na.color = "transparent")
+
+
+# Add end polygons
+end <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp", quiet=T)
+aoi_sf <- st_as_sfc(st_bbox(cost))
+end_sf <- st_crop(end, aoi_sf)
+
+leaflet() %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addProviderTiles("OpenStreetMap", group="OSM") %>%
+  addRasterImage(cost, group="Conductance") %>%
+  addRasterImage(final_cur, group="Current", colors = pal) %>%
+  addPolygons(data=end_sf, fillColor = "red",stroke = F, label=end_sf$NAME, ,fillOpacity = 1) %>% 
+  addLegend(pal = pal, values = values(final_cur),
+    title = "Current flow") %>%
+    addPolygons(data=boundary, fillColor = "yellow",stroke = TRUE, color="red",fillOpacity = 0) %>%
+   addLayersControl(
+    baseGroups = c("Satellite","OSM"),
+    overlayGroups = c("Conductance","Current"))%>% 
+    hideGroup("Conductance") 
+
+
+```
+
+#### Case Study 10: Los Santos
+The final location flagged as a potential climate corridor is fully encompassed in the Cerro Hoya National Park, Panama. As it is fully protected, it makes for a great example of an existing, protected, climate corridor. However the patch of high elevation forest itself is small. 
+
+```{r, include=F, eval=F, echo=F}
+
+##### PREP THE HIGH RESOLUTION LAYER FOR STEP 1
+
+library(terra)
+library(raster)
+lc <- rast("data/spatial/landcover/ESACCI-LC-L4-LC10-Map-10m-CAM.tif")
+#Subset to just osa xmin, x max, ymin, ymax
+
+
+#7.61349370621868, -81.00869876009949
+# 7.167325467301035, -79.88458489336007
+
+coords <- c(-81.0086,-79.884,
+          7.167, 7.6134)
+aoi <-  ext(coords)
+lc_sub  <- crop(lc, aoi)
+
+# Downscale it!
+lc_sub_small <- aggregate(lc_sub, fact=10, fun="modal")
+
+# Convert to a raster
+lc_sub_small_ras <- as(lc_sub_small,"Raster")
+colours <- lc_key$rgb
+# Plot it in leaflet
+at <- seq(-0.5, 10.5, 1)
+cb <- colorBin(palette = colours, bins = at, domain = at)
+
+leaflet() %>%
+    addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+    addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+    addRasterImage(lc_sub_small_ras, colors = cb, group="Raster") %>%
+    addLegend(colors = lc_key$rgb, labels=lc_key$LCCOwnLabel)%>% 
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Raster")) 
+
+# Subest the biomass layer
+biomass <- rast("data/spatial/biomass/NASA_biomass_desnity_estimation.tif")
+biomass_sub  <- crop(biomass, aoi)
+biomass_sub_ras  <- as(biomass_sub,"Raster")
+
+
+m2     <- c(0, NA,
+            1, 1000,
+            2, 150,
+            3, 50,
+            4, 60,
+            5, 20,
+            6, 40,
+            7, 10,
+            8, NA,
+            9, NA,
+            10,2
+            )
+m2 <- matrix(m2, ncol=2, byrow = TRUE)
+
+# workflow
+
+  #Import the raster
+  
+  #Reclassify according to my values
+
+  # Then split out rasters for each habitat type and moderate them.
+
+# Reclassify the map
+lc_re <- classify(lc_sub, m2, right=TRUE)
+
+# Downscale to 100m resolution
+#lc_re_small <- aggregate(lc_re, fact=10, fun="modal")
+lc_re_small <- aggregate(lc_re, fact=10, fun="mean")
+
+lc_re_small_ras <- as(lc_re_small,"Raster")
+
+# Add the modifier
+biomass_sub <- clamp(biomass_sub, upper=100)
+#plot(biomass_sub)
+biomass_modifier <- biomass_sub/100
+plot(biomass_modifier)
+
+
+
+# Mask out non-forest
+just_forest <- ifel(lc_sub_small == 1, 1, NA)
+#plot(just_forest)
+# Match the resolutions
+biomass_modifier <-  resample(biomass_modifier, just_forest)
+# Keep non-forest areas the same too!                      
+biomass_modifier <- mask(biomass_modifier,just_forest, updatevalue=1)
+
+# Take the product
+
+cost_final <- lc_re_small*biomass_modifier
+#plot(lc_osa_final)
+
+cost_final_ras <- as(cost_final,"Raster")
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addRasterImage(lc_re_small_ras, group="Original") %>%
+  addRasterImage(cost_final_ras, group="Modified") %>%
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Original", "Modified")) 
+
+# import mangroves
+mangrove <- vect("data/spatial/WCMC010_MangrovesUSGS2011_v1_4/clipped/mangroves_clipped.shp")
+#rasterise
+mangrove <- rasterize(mangrove, cost_final, 800)
+
+cost_final_mangrove <- cover(mangrove,cost_final)
+
+cost_final_ras <- as(cost_final_mangrove,"Raster")
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addRasterImage(lc_re_small_ras, group="Original") %>%
+  addRasterImage(cost_final_ras, group="Modified") %>%
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Original", "Modified")) 
+
+dir.create("Data/Chapter6/Case_study_10/")
+
+writeRaster(cost_final_ras, "Data/Chapter6/Case_study_10/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+writeRaster(cost_final_ras, "Data/Chapter6/Case_study_10/cost_surface_100m.tif", overwrite=TRUE)
+
+```
+
+```{r, echo=F, eval=F, message=F, warning=F, include=F}
+
+lc <- rast("Data/Chapter6/Case_study_10/cost_surface_100m.tif")
+# lets try a high res circuit scape  
+#start <- focal_pa[focal_pa$NAME=="Corcovado",]
+
+start <- vect("data/spatial/protected_areas/Coastal_protected_areas.shp")
+# Remove marine areas
+
+land_shp <- vect("data/spatial/area_of_interest/aoi.shp")
+start_cropped <- crop(start, land_shp)
+# plot(start_cropped)
+# plot(start, add=T, col="lightblue")
+# plot(test, add=T)
+
+
+  end <- vect("data/spatial/area_of_interest/high_elevation_pas.shp")
+
+# Convert to a spatvect
+start_tmp <- as(start_cropped, "Spatial")
+start_v <- vect(start_tmp)
+end_tmp <- as(end, "Spatial")
+end_v <- vect(end_tmp)
+
+# Add area (for current)
+start$area_km <- round(start_v$GIS_AREA,0)
+#plot(start_v)
+
+
+#start_ras <- rasterize(start_v,lc_re_small, field=1)
+end_ras <- rasterize(end,lc, field=999)
+polygons <- end_ras
+plot(polygons)
+
+# remove the marine area
+start_v$area_km<- start_v$GIS_AREA - start_v$GIS_M_AREA
+
+
+head(start_v)
+start_p <- centroids(start_v, inside=T)
+sources <- rasterize(start_p,lc, 
+             field="area_km") # make the 
+end_p <- centroids(end_v, inside=T)
+grounds <- rasterize(end_p,lc_re_small, 
+             field=1) # make the area the current
+
+
+plot(cost_final_ras)
+plot(start_v, add=T)
+plot(start_p, add=T)
+plot(end_v, add=T, col="red")
+
+
+# Check the centroid is working
+# plot(start[start$NAME=="Golfo Dulce",])
+# 
+# plot(start_p, add=T, cex=3)
+# #plot(centroids(start_v, inside=T), add=T)
+# plot(sources, add=T, col="pink") 
+            
+lc    <- as(lc,"Raster")
+polygons_ras <- as(polygons,"Raster")
+sources_ras    <- as(sources,"Raster")
+grounds_ras    <- as(grounds,"Raster")
+
+plot(polygons_ras)
+plot(sources_ras)
+plot(grounds_ras)
+
+
+
+
+# Source
+writeRaster(sources_ras, "Data/Chapter6/Case_study_10/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+# Ground
+writeRaster(grounds_ras, "Data/Chapter6/Case_study_10/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+# Polygon
+writeRaster(polygons_ras, "Data/Chapter6/Case_study_10/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+dir.create("Data/Chapter6/Case_study_9/output")
+```
+
+```{r, echo=F, message=F, warning=F}
+# Import the original cost surface
+lc <- rast("Data/Chapter6/Case_study_10/cost_surface_100m.tif")
+
+# Plot the result - TIME TAKEN 6454 seconds - will try with different solver
+res_cur <- rast("Data/Chapter6/Case_study_10/output/Case_study_10_curmap.asc")
+
+start <- vect("data/spatial/protected_areas/Coastal_protected_areas.shp")
+
+
+#plot(res_cur)
+
+res_clamp <- clamp(res_cur, upper=10)
+#plot(res_clamp)
+# Convert the landcover map
+# mask outlow voltage areas
+res_clamp <- app(res_clamp, fun=function(x){ x[x < 0.1] <- NA; return(x)} )
+
+# Add in start nodes
+
+# Add in protect areas (cropped to the area)
+tmp <- crop(start, res_cur)
+start_sf <- sf::st_as_sf(tmp)
+
+#plot(res_clamp)
+final_cur    <- as(res_clamp,"Raster")
+cost    <- as(lc,"Raster")
+
+boundary<- st_as_sfc(st_bbox(final_cur))
+
+pal <- colorNumeric(c("#0C2C84", "#41B6C4", "#FFFFCC"), values(final_cur),
+  na.color = "transparent")
+
+# Add end polygons
+end <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp", quiet=T)
+aoi_sf <- st_as_sfc(st_bbox(cost))
+end_sf <- st_crop(end, aoi_sf)
+
+
+leaflet() %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addProviderTiles("OpenStreetMap", group="OSM") %>%
+  addRasterImage(cost, group="Conductance") %>%
+  addRasterImage(final_cur, group="Current", colors = pal) %>%
+  addPolygons(data=end_sf, fillColor = "red",stroke = F, label=end_sf$NAME, ,fillOpacity = 1) %>% 
+  addLegend(pal = pal, values = values(final_cur),
+    title = "Current flow") %>%
+    addPolygons(data=boundary, fillColor = "yellow",stroke = TRUE, color="red",fillOpacity = 0) %>%
+   addLayersControl(
+    baseGroups = c("Satellite","OSM"),
+    overlayGroups = c("Conductance","Current"))%>% 
+    hideGroup("Conductance") 
+
+
+```
+
+
+
+```{r, eval=F, echo=F}
+
+# ## High elevation connectivity
+# 
+# **TO BE DONE**
+# 
+# 
+# Here I give each fragment a unique code and use the connectivity between the
+# 
+# 
+# In particular, the all-to-one mode can be an alternative to the pairwise mode when
+# the goal is to produce a cumulative map of important connectivity areas among
+# multiple source/target patches.
+# 
+# 
+# NOT WORKING
+
+
+
+
+# Here i just need the protected area fragments
+# Create folders to store the results
+dir.create("Data/Chapter6/High_connectivity_low_res")
+path_text <- "Data/Chapter6/High_connectivity_low_res"
+
+# read them back in with the raster package
+end_polygons <- raster("Data/Chapter6/Coastal_pa_all_low_res/end_poly_stars.tif")
+grounds_polygons <- raster("Data/Chapter6/Coastal_pa_all_low_res/grounds_stars.tif")
+cellmap <- raster("Data/Chapter5/Low_res_resistance_surface.tif")
+
+
+# Match resolutions with the cost surface (cellmap)
+plot(cellmap)
+plot(grounds_polygons, add=T, col="blue")
+plot(end_polygons, add=T, col="red")
+
+end_final       <- extend(end_polygons, cellmap)
+grounds_final   <- extend(grounds_polygons, cellmap)
+
+
+extent(cellmap)
+extent(grounds_final)
+extent(end_final)
+
+# Give each source an ID
+grounds_final[grounds_final>0] <- 1
+length(grounds_final[grounds_final>0])
+length(unique(end_final[end_final>0]))
+
+# This inst working in circuitscape
+#instead make the grounds from the poly file
+#new_grounds <- end_final
+#new_grounds[new_grounds>0]<- 1
+
+length(new_grounds)
+writeRaster(cellmap, paste0(path_text,"/regions_grid.asc"), overwrite=T)
+writeRaster(end_final, paste0(path_text,"/polygons.asc"), overwrite=T)
+writeRaster(grounds_final, paste0(path_text,"/points.asc"), overwrite=T)
+
+dir.create(paste0(path_text,"/output"))
+
+
+
+```
+

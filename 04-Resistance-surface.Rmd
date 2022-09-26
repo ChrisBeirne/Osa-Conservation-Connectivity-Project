@@ -1,0 +1,842 @@
+
+
+```{r ch4_setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library("devtools")
+#install_github("achubaty/grainscape")
+library(grainscape)
+library(raster)
+library(ggplot2)
+library(ggpubr)
+library(stars)
+library(sf)
+library(leastcostpath)
+library(gdistance)
+library(kableExtra)
+library(igraph)
+library(nngeo)
+library(dplyr)
+library(leaflet)
+
+
+# Import required data files
+
+merged_shp <- st_read("data/spatial/area_of_interest/aoi.shp")
+high_pa <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp")
+mangrove_large <- st_read("data/spatial/mangroves/mangrove_large_1kmsq.shp")
+```
+
+# Resistance surface {#cost-surface}
+
+The most fundamental aspect of connectivity analyses is the 'resistance surface'. Resistance surfaces are spatially-explicit raster data layers that assign a resistance value to landscape features which in theory reflects the degree to which the feature in question impedes or facilitates movement. With a robust and rigorous resistance surface, functional connectivity across the landscape can be assessed. However, one of the biggest challenges in connectivity mapping remains the designation of specific resistance values to landscape features. See  Zeller et al. (2012) <https://link.springer.com/article/10.1007/s10980-019-00870-3>.
+
+
+## Creating the resistance surface
+
+For this approach to give meaningful and actionable output, we need to define resistance surfaces which reflect animal movement. We know that spatial scale is an important element of this - the higher the resolution of the map, the closer it can reflect reality. However, there exists a tradeoff, the higher the resolution, the higher the computational time. We will switch between scales depending on the the approach and the scale of inference we like. General, broad spatial scale analysis will be done at low resolution. When we want to study a specific location, we will do it in high resolution. 
+
+See the reference below for consideration of spatial scale:
+
+Hernando A, Velázquez J, Valbuena R, et al (2017) Influence of the resolution of forest cover maps in evaluating fragmentation and connectivity to assess habitat conservation status. Ecol Indic 79:295–302. https://doi.org/10.1016/j.ecolind.2017.04.031
+
+### Step 1: Coarse resoluton
+The first step in the analysis is to simplify the total focal area to 10 priority landscapes - we simply want to quantify the distance to and relative disturbance along the route, of low elevation to high elevation areas. To do this we use a computationally rapid, least-costs paths approach (see Chapter 4 for a description). The backbone of this approach uses the human modification index, which represents a proxy for the structural connectivity across the focal landscapes, modified by whether the area is protected or not, and weather it has (on average) forest cover.
+
+The basis of this approach is the human modification index layer, which we have invert so that high values = low disturbance (green), and low values = high disturbance (orange/white):
+
+```{r ch4_1, include=F}
+# To start this I need a target raster of the approprate resolution
+# We can use the GHM rastor as the template
+ghm_raster <- read_stars("data/spatial/human_modification_index/gHM_2016.tif")
+
+ghm_raster_17N <- st_warp(ghm_raster, crs=31971)
+plot(ghm_raster_17N, las=1,nbreaks=11 ,breaks="equal", col=terrain.colors(10), bg="grey")
+
+```
+
+
+```{r ch4_2, echo=F, message=F}
+# Turn it into a raster
+ghm_RAS <- as(ghm_raster_17N, "Raster")
+# Invert it _> conductance 
+ghm_COND <- 1- ghm_RAS
+
+plot(ghm_COND)
+```
+
+Now we bring in the forest cover layer to penalize non-forest areas. The Y-axis label denotes % forest cover. 
+
+```{r ch4_3, echo=F, message=F}
+gfc_2020 <- read_stars("data/spatial/gfc/global_forest_change_2020_v1_8.treecover2000.tif")
+
+# Get it to the same resolution as GHM
+gfc_LOWRES <- st_warp(gfc_2020, ghm_raster)
+
+# Transform to 17N
+gfc_LOWRES <- st_warp(gfc_LOWRES, crs=31971)
+
+# Convert toi raster
+gfc_LOWRES <-  as(gfc_LOWRES, "Raster")
+
+# I CURRENTLY HAVE ISSUES WITH NA's
+
+# Interpolate missing
+# First turn the missing values into 0.01
+tmp <- gfc_LOWRES
+
+# Create a 3x3 average - NA's ignored
+a <- focal(tmp, w=matrix(1/9, nc=3, nr=3), na.rm=T)
+plot(a)
+
+# Replace any NA's with the 3x3 average 
+gfc_LOWRES[is.na(gfc_LOWRES)] <- a[is.na(gfc_LOWRES)]
+#plot(gfc_LOWRES)
+
+# I am having issues with some mangroves being outside of raster. Add a 5km buffer.
+aoi_17N <- st_transform(merged_shp,31971)
+aoi_17N<- st_buffer(aoi_17N, 5000)
+#plot(st_geometry(aoi_17N))
+
+# Then remask the focal area to remove the places added in
+# Make all land mass 1
+land_mass <- ghm_RAS
+
+land_mass <- setValues(land_mass, 1)
+#plot(land_mass)
+land_mass <- mask(land_mass, as(aoi_17N, "Spatial"), inverse = F )
+#plot(land_mass)
+
+#plot(land_mass)
+gfc_LOWRES <- gfc_LOWRES*land_mass
+
+#plot(gfc_LOWRES)
+```
+
+Now we take the product of conductance with forest cover, to get an integrated forest-disturbance surface at 1km resolution: 
+
+```{r  ch4_4, echo=F, message=F}
+cond_1km <- (gfc_LOWRES*ghm_COND*10)
+plot(cond_1km)
+```
+
+This layer is now ready for least cost path modelling. 
+
+```{r  ch4_5, include=F, eval=T}
+library(leaflet)
+leaflet() %>%
+#addProviderTiles("OpenStreetMap", group="OSM (default)") %>% 
+addProviderTiles(providers$Esri.WorldImagery, group = "Satellite") %>% 
+addRasterImage(cond_1km, group="Raster") %>% 
+  addLayersControl(
+#    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Raster"))
+
+
+```
+
+```{r  ch4_6, include=F}
+# Write this layer for LCP analyses 
+dir.create("Data/Chapter5/")
+writeRaster(cond_1km, "Data/Chapter5/Low_res_resistance_surface.tif", overwrite=T)
+```
+
+
+
+```{r  ch4_7, include=F, eval=F}
+
+# OLD METHOD REMOVED
+# 
+# We thin take this layer and transform the disturbances (on a 0-1 scale) to conductance values (high values = high conductance) which will be scaled from 0 - 1000. Note in addition to the human disturbance layer, we also specify that areas lying within protected areas have a higher conductance than those outside of protected areas. 
+# 
+# The reclassification scheme is as follows:
+# 
+# cost_ghm[cost_ghm==1] <- NA [Urban areas are excluded as they have no functional connectivity]
+# cost_ghm[cost_ghm==2] <- 2 [ Heavily disturbed areas - with very low probability of animal movement]
+# cost_ghm[cost_ghm==3] <- 5 [...]
+# cost_ghm[cost_ghm==4] <- 10 [...]
+# cost_ghm[cost_ghm==5] <- 50  [...]
+# cost_ghm[cost_ghm==6] <- 100 [Intermediate disturbance]
+# cost_ghm[cost_ghm==7] <- 150 [...]
+# cost_ghm[cost_ghm==8] <- 200 [...]
+# cost_ghm[cost_ghm==9] <- 600 [...]
+# cost_ghm[cost_ghm==10] <- 800 [Undisturbed landscapes outside of prtected areas]
+# cost_ghm[cost_ghm==11] <- 1000 [Undisturbed landscapes inside protected areas]
+# 
+# Thus the resuting conductance surface looks like this:
+# 
+
+
+
+focal_pa <- readRDS( "data/spatial/WDPA_protected_areas/focal_area_pa_shp.RDS")
+
+focal_pa <- st_transform(focal_pa,st_crs(4326)) 
+focal_pa <- focal_pa %>% st_sf() %>%  st_cast()
+
+focal_pa_17N <- st_transform(focal_pa, crs=31971)
+
+roi_17N <- st_transform(merged_shp, crs=31971)
+#plot(st_geometry(merged_shp), col=rgb(0,0,0,0.1), border=F)
+#plot(st_geometry(focal_pa[focal_pa$DESIG_TYPE=="International",]), col=met.brewer("Nizami")[1], add=T)
+#plot(st_geometry(focal_pa[focal_pa$DESIG_TYPE=="National",]), col=met.brewer("Nizami")[6], add=T)
+#legend("topright", c("National protected areas"), pch=15, col=c(met.brewer("Nizami")[6]))
+  
+# Convert these to a raster
+
+# First the focal area - assign these the values of 2
+roi_ras <- st_rasterize(roi_17N,template=ghm_raster_17N, align=T) # default 
+#plot(roi_ras, axes = TRUE)
+# Convert the landmass to 2
+roi_ras[[1]][roi_ras[[1]]==0 & is.na(roi_ras[[1]])==F] <- 2
+# All land mass has value <- 2
+
+# rasterize based on geometry and a column named "value". Change the name of this column if necessary
+pa_ras <- st_rasterize(focal_pa_17N[focal_pa_17N$DESIG_TYPE=="National","geometry"],template=ghm_raster_17N, align=T ) # default 
+# Convert the protected area to 1
+pa_ras[[1]][pa_ras[[1]]>1 & is.na(pa_ras[[1]])==F] <- 1
+# Make non prtected ares 0 
+pa_ras[[1]][is.na(pa_ras[[1]])==T] <- 0
+
+
+#plot(roi_ras, axes=T, main="Focal area")
+#plot(pa_ras, axes=T, main = "Protected areas")
+
+crop_area <- st_as_sfc(st_bbox(roi_ras))
+
+#st_bbox(roi_ras)
+#st_bbox(ghm_raster_17N)
+#st_bbox(pa_ras)
+
+cost_ras <- st_crop(roi_ras, crop_area) - st_crop(pa_ras, crop_area)
+
+#par(mfrow=c(1,3))
+#plot(roi_ras, axes=T, main="Focal area")
+#plot(pa_ras, axes=T, main = "Protected areas")
+#plot(cost_ras, axes=T, main="Non-protected areas")
+#plot(ghm_raster_17N)
+
+# Convert to raster
+cost_ras <-  as(cost_ras, "Raster")
+cost_ghm <-  as(ghm_raster_17N, "Raster")
+
+# Make it discrete
+cost_ghm <- round(cost_ghm*10,0)+1
+# Invert it
+cost_ghm <- (cost_ghm*-1)
+cost_ghm <- (cost_ghm+12)
+
+#par(mfrow=c(1,1))
+#plot(cost_ghm)
+
+# Visualise on leaflet
+#library(leafem)
+#leaflet() %>%
+#  addProviderTiles("OpenStreetMap") %>%
+#  addRasterImage(cost_ghm)
+# This is a basic cost surface, In reality, people use much stronger cost surfaces. eg. running from 0-1000, and excluding areas completely which are overdeveloped. 
+
+
+# Make the 1's NA's
+summary(cost_ghm)
+cost_ghm[cost_ghm==1] <- NA
+cost_ghm[cost_ghm==2] <- 2
+cost_ghm[cost_ghm==3] <- 5
+cost_ghm[cost_ghm==4] <- 10
+cost_ghm[cost_ghm==5] <- 50
+cost_ghm[cost_ghm==6] <- 100
+cost_ghm[cost_ghm==7] <- 150
+cost_ghm[cost_ghm==8] <- 200
+cost_ghm[cost_ghm==9] <- 600
+cost_ghm[cost_ghm==10] <- 800
+cost_ghm[cost_ghm==11] <- 1000
+
+plot(cost_ghm)#, las=1,nbreaks=11 ,breaks="equal", col=terrain.colors(10), bg="grey")
+
+```
+
+
+### Step 2: High resolution landcover {#cost-surface_high}
+Although we have a 10m landcover layer available to us, it would have take weeks to run connecivity analyses, even for smaller locations. Consequently, I am presenting a raster which has been reduced by a factor of ten in every direction (x and y) resulting in a 100m resolution.
+
+After the prioritization steps in [the least-cost-path chapter](#lcp), we will take a subset of these candidate locations and explore them in high resolution. The high resolution map is created in the same was as the coarse scale map (above), however at a finer grain (100m vs. 1km) with land-use and habitat quality accounted for. The high resolution maps leans heavily on the land cover map of Central America created by ESA.
+
+In order to conceptulize the resistance of each of these layers it is important to understand their definitions [See this link for full details and validation](https://2018mexicolandcover10m.esa.int/documents/ESACCI_CCN2_PVIRv0.3.pdf):
+
+**Tree cover**: Area with a **tree canopy cover of more than 15%** of the surface and higher
+than the shrub cover and the herbaceous cover. A tree is a woody perennial
+plant with a single, well-defined stem carrying a more-or-less defined crown (Ford-Robertson, 1971) and being at least 3m tall. Snow and/or ice, open water or built-up areas cover less than 50% of the surface.
+
+**Shrub cover**: area with an **herbaceous cover of more than 15% of the surface and dominant with regards to the other vegetation types (higher canopy cover than the tree cover or the shrub cover)**. Herbaceous plants are defined as plants without persistent stem or shoots above ground and lacking definite firm structure (Scoggan, 1978).
+
+**Crop land**: The cropland corresponds to the annual cropland which is defined as a piece of **land (> 50% of the surface) that is sowed/planted and harvestable at least once within the 12 months after the sowing/planting date.** The annual cropland produces a herbaceous cover and is sometimes combined with some tree or woody vegetation (less than 20% canopy cover). This definition is an adaptation of the ‘JECAM annual cropland class from a remote sensing perspective’
+definition (JECAM, 2014).
+
+**Sparce vegetation**: The area where the sum of all vegetation canopy cover is less than 15%.
+
+**Grassland**: The area with an herbaceous cover of more than 15% of the surface and
+dominant with regards to the other vegetation types (higher canopy cover than
+the tree cover or the shrub cover). Herbaceous plants are defined as plants
+without persistent stem or shoots above ground and lacking definite firm
+structure (Scoggan, 1978). Snow and/or ice, open water or built-up areas cover
+less than 50% of the surface.
+
+
+**Bare areas**: Areas where the sum of all vegetation canopy cover is less than 4%. Included are
+bare rock areas, sands and deserts.
+
+**Built-up areas**: The class is composed of any type of areas with a predominant artificial surface
+(> 50%): buildings, roads, airports, etc. The class also includes industrial areas,
+waste dump deposit and extraction sites.
+
+We can then integrate this high resolution land use map with other layers of interest to generate our cost surface.
+
+The following is a down-scaled map of the whole survey area. 
+
+```{r ch4_8, echo=F, message=F, warning=F}
+lc_raster <- read_stars("data/spatial/landcover/ESACCI-LC-L4-LC10-Map-10m-CAM.tif")
+lc_key <- read.csv("data/spatial/landcover/ESACCI-LC_S2_Prototype_ColorLegend.csv", header=T, sep=";")
+lc_key$rgb <- rgb(lc_key$R/256,lc_key$G/256,lc_key$B/256)
+# Remove no data
+lc_key <- lc_key[1:11,]
+# Simplify labels
+lc_key$LCCOwnLabel[lc_key$LCCOwnLabel=="Tree cover areas"] <- "Tree cover"
+lc_key$LCCOwnLabel[lc_key$LCCOwnLabel=="Shrubs cover areas"] <- "Shrub cover"
+lc_key$LCCOwnLabel[lc_key$LCCOwnLabel=="Vegetation aquatic or regularly flooded"] <- "Flooded vegetation"
+
+# Mask out the areas not in the focal region
+#plot(st_geometry(merged_shp))
+
+lc_raster <- st_crop(lc_raster, merged_shp, crop=FALSE)
+
+plot(lc_raster, breaks=seq(-0.5,10.5, by=1),col=lc_key$rgb[1:11], key.pos=NULL)
+legend("topright",legend=lc_key$LCCOwnLabel, fill=lc_key$rgb )
+```
+
+Lets zoom in and explore a location we know well.
+
+#### Interactive map
+
+```{r ch4_9, echo=F, message=F, warning=F}
+library(terra)
+lc <- rast("data/spatial/landcover/ESACCI-LC-L4-LC10-Map-10m-CAM.tif")
+#Subset to just osa xmin, x max, ymin, ymax
+aoi <-  ext(-84, -82.5,8.38,9.38)
+lc_sub  <- crop(lc, aoi)
+
+# Downscale it!
+lc_sub_small <- aggregate(lc_sub, fact=10, fun="modal")
+
+# Convert to a raster
+lc_sub <- as(lc_sub_small,"Raster")
+colours <- lc_key$rgb
+# Plot it in leaflet
+at <- seq(-0.5, 10.5, 1)
+cb <- colorBin(palette = colours, bins = at, domain = at)
+
+leaflet() %>%
+    addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+    addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+    addRasterImage(lc_sub, colors = cb, group="Raster") %>%
+    addLegend(colors = lc_key$rgb, labels=lc_key$LCCOwnLabel)%>% 
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Raster")) 
+
+```
+
+It works pretty well! But you can see that the main issue is that forest **quality** is not accounted for. The green area encompasses all sorts, from high biomass nice forest to plantations. 
+
+**REVIEW QUESTION** how shall we account for forest quality? We could use the human modification index? Maybe the tree height layer... lets see how they look. One inescapable issue is that they are likely to be at a different resolution to the landcover data. 
+
+#### Adjusting forest conductance
+
+We can potentially account for forest quality using a suite of different layers: The human modification layer, forest height, forest biomass and forest cover. Below we can explore those options.  
+
+```{r ch4_10, echo=F, eval=F}
+# Download a high res hansen map
+#py_install("numpy")
+
+ee_Initialize()
+# Check things are working
+ee_check()
+# Second text
+reticulate::py_config()
+aoi_gee  <-  ext(-84, 8.38, -82.5,9.38)
+focal <- ee$Geometry$Rectangle(as.numeric(st_bbox(aoi_gee)))
+
+gfc <- ee$Image("UMD/hansen/global_forest_change_2021_v1_9")
+Map$addLayer(
+    eeObject = gfc,
+    visParams = list(
+      bands = c('treecover2000'),
+      min = 0,
+      max = 100,
+      palette = c('white','green')),
+    name = 'Forest cover')
+
+
+# Map$addLayer(
+#     eeObject = gfc,
+#     visParams = list(
+#       bands = c('loss'),
+#       min = 0,
+#       max = 1,
+#       palette = c('white','red')),
+#     name = 'Forest cover')
+
+
+loss <- gfc$select("loss")
+notLoss <- (loss[["loss"]] *(-1)) +1
+
+gfc_remain <- gfc$updateMask(notLoss)
+
+Map$addLayer(
+    eeObject = gfc_remain,
+    visParams = list(
+      bands = c('treecover2000'),
+      min = 0,
+      max = 100,
+      palette = c('white','green')),
+    name = 'Forest cover')
+
+geom_params <-   list(
+  scale = 30,
+  crs = 'EPSG:4326',
+  region = '[[-84 , 8.38], [-82.5, 8.38], [-82.5, 9.38], [-84 , 9.38]]'
+  #region = focal
+)
+
+geometry <- ee$Geometry$Rectangle(
+  coords = c(-84, 8.38, -82.5,9.38),
+  proj = "EPSG:4326",
+  geodesic = FALSE
+)
+#path <- gfc_remain[["treecover2000"]]$getDownloadUrl(geom_params)
+
+ee_as_raster(gfc_remain[["treecover2000"]], region=geometry, maxPixels = 10000000000, scale=30)
+
+```
+
+The map below has stacked several rasters in order to directly compare them. 
+
+**Human modification**: 1km resolution, data collected 2016
+
+**Forest height**: 927m resolution, data collect 2005, published 2011
+
+**Biomass**: 300m resolution, data collected 2010, published 2020
+
+**Forest cover**: 30m, collected 2021, published 2022 
+
+Use the menu contained in the white box to view the different data layers. 
+
+```{r ch4_11, echo=F, message=F, warning=F}
+fh <- rast("data/spatial/height/global_forest_canopy_height_2005.1.tif")
+fh_sub  <- crop(fh, aoi)
+fh_sub_ras  <- as(fh_sub,"Raster")
+
+ghm <- rast("data/spatial/human_modification_index/gHM_2016.tif")
+ghm_sub  <- crop(ghm, aoi)
+ghm_sub_ras  <- as(ghm_sub,"Raster")
+# Invert it so it plot the same as forest height
+ghm_sub_ras <- ghm_sub_ras*-1
+
+biomass <- rast("data/spatial/biomass/NASA_biomass_desnity_estimation.tif")
+biomass_sub  <- crop(biomass, aoi)
+biomass_sub_ras  <- as(biomass_sub,"Raster")
+
+gfc <- rast("data/spatial/gfc/global_forest_change_2021_v1_9.treecover2000_Osa.tif")
+#gfc_new <- rast("data/spatial/gfc/global_forest_change_2021_v1_9_2022_OSA.tif")
+
+gfc_sub  <- crop(gfc, aoi)
+gfc_100 <- resample(gfc_sub, lc_sub_small)
+#plot(gfc_100)
+# Subsample to same resolution as the 
+gfc_sub_ras  <- as(gfc_100,"Raster")
+
+leaflet() %>%
+    addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+    addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+    addRasterImage(lc_sub, colors = cb, group="lc") %>%
+    addRasterImage(fh_sub_ras, group="Forest height") %>%
+    addRasterImage(ghm_sub_ras, group="Human modification") %>%
+    addRasterImage(biomass_sub_ras, group="Biomass") %>%
+    addRasterImage(gfc_sub_ras, group="GFC") %>%
+    
+    addLegend(colors = lc_key$rgb, labels=lc_key$LCCOwnLabel)%>% 
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("lc", "Forest height","Human modification", "Biomass", "GFC")) 
+
+```
+
+*Summary of potential modifiers*
+
+Exploring the layers above we can make some general conclusions:
+
+- The human modification is mainly a copy of the landcover layer, so that will not be an effective forest quality modifer
+
+- Forest height looks useful but it is at a very coarse scale. It is effectively the mean forest height over the cell, so it would account for "patch size" and isolation indirectly. But much better than the simple forest/non-forest layer.
+
+- The global forest cover dataset, despite being a higher resolution than the other layers, does not appear very good at discriminating forest quality. 
+
+- The biomass looks effective, and it is more recent than the forest height layer. 
+
+In conclusion, we will use biomass as the moderator for forest quality.The way we incorporate it is to create a raster whereby biomass scales linearly from 0-1 between 0 and 100 Mg C/ha, and all values >100 Mg C/ha are also denoted as 1. We then take the product of the conductance layer with the scaled biomass layer, to give a final conductance surface which weights high quality (high biomass) forest as highly conductive to animal movement.     
+
+
+## High resolution raster re-classification
+
+Now that we have a high resolution habitat map (accounting for forest quality), we need to turn that into a "conductance surface". This means assigning values which relate the habitat to the probability of animal movement within and between it. 
+
+Using traditional approaches this took a huge amount of computational time. However, we found a work around using the 'terra' package in R. This package uses clever computing to reduce the memory load of large rasters making high resolution mapping in R more scale-able. For our re-classification scheme we will use the following formula, based on work from other publications. The values should be viewed as the probability of use e.g. 1000 = very high probability of movement, 1 = very low:
+
+- No data:              0  -> NA
+- Tree cover:           1  -> 1000 [The best, will moderate with the tree height layer to account for quality] 
+- Shrub cover:          2  -> 150 [some cover - mianly seems to be forest margins]
+- Grassland:            3  -> 50  [Pasture]  
+- Cropland:             4  -> 60 [May have canopy cover, risky]
+- Flooded vegetation:   5  -> 20 [hard to move through]
+- Sparse vegetation:    6  -> 40 [Risky but useable]
+- Bare areas:           7  -> 10 [Risky but useable]
+- Built up areas:       8  -> NA [Urban areas are excluded as they have no functional connectivity]
+- Snow and/or Ice:      9  -> NA
+- Open Water:           10 -> 2 [Very low conductivity -> last resort (100m resolution will represent large water bodies)]
+
+### High resolution case study: Osa
+
+Zooming in to a specific landscape allows us to map connectivity at much higher resolution. We will ultimately do this for all of the focal landscapes defined, however here we present a single example to check that the high resolution resistance classification scored defined above are reasonable.
+
+Below is the high resolution 'resistance to movement' map for the Osa Pennisula. Red areas denote areas with high resistance to movement whereas blue areas denote zones with very low resistance.  
+
+```{r  ch4_11a, echo=F, message=F, warning=F}
+m2     <- c(0, NA,
+            1, 1000,
+            2, 150,
+            3, 50,
+            4, 60,
+            5, 20,
+            6, 40,
+            7, 10,
+            8, NA,
+            9, NA,
+            10,2
+            )
+m2 <- matrix(m2, ncol=2, byrow = TRUE)
+
+# workflow
+
+  #Import the raster
+  
+  #Reclassify according to my values
+
+  # Then split out rasters for each habitat type and moderate them.
+
+  # Merge for final raster
+
+library(terra)
+lc <- rast("data/spatial/landcover/ESACCI-LC-L4-LC10-Map-10m-CAM.tif")
+
+#Subset to just osa xmin, x max, ymin, ymax
+aoi <-  ext(-84, -82.5,8.38,9.38)
+lc_sub  <- crop(lc, aoi)
+
+# Reclassify the full thing?
+lc_re <- classify(lc_sub, m2, right=TRUE)
+
+# Downscale to 100m resolution
+#lc_re_small <- aggregate(lc_re, fact=10, fun="modal")
+lc_re_small <- aggregate(lc_re, fact=10, fun="mean")
+
+lc_re_small_ras <- as(lc_re_small,"Raster")
+
+```
+
+
+```{r  ch4_13, echo=F, message=F, warning=F, include=F}
+#setup palette
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addRasterImage(biomass_sub_ras, group="Biomass") %>%
+  addRasterImage(lc_re_small_ras, group="Resistance") %>%
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c( "Biomass","Resistance")) 
+```
+
+
+```{r  ch4_14, echo=F, message=F, warning=F, include=F}
+#### Add the modifier for biomass
+# First we should examine the range of values of biomass (Mg C/ha):
+# 
+# - mean = `r mean(values(biomass_sub_ras), na.rm=T)`
+# - min = `r min(values(biomass_sub_ras), na.rm=T)`
+# - max = `r max(values(biomass_sub_ras), na.rm=T)`
+# 
+# The way I will do this is scale the biomass layer from 0 -> 1. Anything over 100 gets 1, as it is represents good quality forest. 
+# 
+# The resulting layer looks like this:
+
+
+biomass_sub <- clamp(biomass_sub, upper=100)
+#plot(biomass_sub)
+biomass_modifier <- biomass_sub/100
+plot(biomass_modifier)
+```
+
+```{r  ch4_15, echo=F, message=F, warning=F, include=F}
+
+#We then mask out non-forest areas, and apply the modifier, which creates a surface which looks like:
+
+just_forest <- ifel(lc_sub_small == 1, 1, NA)
+#plot(just_forest)
+# Match the resolutions
+biomass_modifier <-  resample(biomass_modifier, just_forest)
+# Keep non-forest areas the same too!                      
+biomass_modifier <- mask(biomass_modifier,just_forest, updatevalue=1)
+```
+
+```{r  ch4_16, echo=F, message=F, warning=F}
+cost_final <- lc_re_small*biomass_modifier
+#plot(lc_osa_final)
+
+cost_final_ras <- as(cost_final,"Raster")
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addRasterImage(lc_re_small_ras, group="Original") %>%
+  addRasterImage(cost_final_ras, group="Modified") %>%
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Original", "Modified")) 
+
+```
+
+This layer looks like a reasonable resistance surface, however mangroves are paying a big price for their small stature, and appear highly resistant to animal movement (as they are low biomass). We instead will give them a higher higher conductance score (800), which makes them more favorable to animal movement. The update map below shows the high resolution map for the Osa Peninsula, 
+
+```{r  ch4_17, echo=F, message=F, warning=F}
+# import mangroves
+mangrove <- vect("data/spatial/WCMC010_MangrovesUSGS2011_v1_4/clipped/mangroves_clipped.shp")
+#rasterise
+mangrove <- rasterize(mangrove, cost_final, 800)
+
+cost_final_mangrove <- cover(mangrove,cost_final)
+
+cost_final_ras <- as(cost_final_mangrove,"Raster")
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addRasterImage(lc_re_small_ras, group="Original") %>%
+  addRasterImage(cost_final_ras, group="Modified") %>%
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Original", "Modified")) 
+
+dir.create("Data/Chapter6/Case_study_1_Osa/")
+
+writeRaster(cost_final_ras, "Data/Chapter6/Case_study_1_Osa/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+writeRaster(cost_final_ras, "Data/Chapter6/Case_study_1_Osa/cost_surface_100m.tif", overwrite=TRUE)
+
+```
+
+These resistances surfaces are used in subsequent chapters to perform the connectivity analyses.
+
+
+```{r, eval=F, include =F}
+
+##### OLD CODE TESTING 
+#lc_raster <- raster("data/spatial/landcover/ESACCI-LC-L4-LC10-Map-10m-CAM.tif")
+#lc_stars <- read_stars("data/spatial/landcover/ESACCI-LC-L4-LC10-Map-10m-CAM.tif")
+
+# The high resolution map is 170,000 x 170,000 cells...
+# The HMI raster is           1,300  x 1700... x100 smaller.
+
+
+# So for now lets crop to just the Osa pennisula
+
+# Buffier piedras blanca
+
+template <- focal_pa[focal_pa$NAME=="Piedras Blancas",]
+template <- st_buffer(template, 50000)
+
+# # starting parks
+# leaflet() %>%
+#   addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+#   addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+#     addPolygons(data=template, fillColor = "red",
+#                label = template$NAME, group="aoi") %>%
+#   addLayersControl(
+#     baseGroups = c("OSM (default)", "Satellite"),
+#     overlayGroups = c("aoi")) 
+
+#aoi_hr <- st_as_sfc(st_bbox(template))
+# Based on the above I specify my own AOI
+aoi_custom <- st_bbox(template)
+aoi_custom[1] <- -84
+aoi_custom[2] <- 8.38
+aoi_custom[3] <- -82.5
+aoi_custom[4] <- 9.38
+template <- st_as_sfc(aoi_custom)
+# Visualise the AOI
+
+
+# starting parks
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+    addPolygons(data=template, fillColor = "red",
+               group="aoi") %>%
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("aoi"))
+
+
+
+# crop the raster layer to this aoi and see how big it is
+lc_osa_ras <- crop(lc_raster, st_bbox(aoi_custom))
+
+# Plot raster with a key
+plot(lc_osa_ras, breaks=seq(-0.5,10.5, by=1),col=lc_key$rgb[1:11], key.pos=NULL)
+# Looks good
+# Mask off the islands
+lc_osa_ras <- mask(lc_osa_ras, merged_shp)
+writeRaster(lc_osa_ras, "data/Chapter4/os_raster_lc_10m.tif", overwrite=T)
+
+
+lc_osa_ras<- raster("data/Chapter4/os_raster_lc_10m.tif")
+
+plot(lc_osa_ras, breaks=seq(-0.5,10.5, by=1),col=lc_key$rgb[1:11], key.pos=NULL)
+# Reclassify this into a conductance layer 
+
+# Starting hist
+hist(lc_osa_ras, breaks=seq(-0.5, 10.5,by=1))
+
+
+
+library(terra)
+lc <- rast("data/Chapter4/os_raster_lc_10m.tif")
+
+
+
+
+lc_re <- classify(lc, m2, right=TRUE)
+
+plot(lc_re)
+
+
+library(terra)
+lc <- rast("data/Chapter4/os_raster_lc_10m.tif")
+
+# lets try a high res circuit scape  
+start <- focal_pa[focal_pa$NAME=="Corcovado",]
+end <- high_pa
+
+# Convert to a spatvect
+start <- as(start, "Spatial")
+start_v <- vect(start)
+end <- as(end, "Spatial")
+end_v <- vect(end)
+
+
+# Rasterise polygon with TERRA?
+start_ras <- rasterize(start_v,lc_re, field=1)
+end_ras <- rasterize(end_v,lc_re, field=999)
+
+plot(start_ras)
+plot(end_ras,add=T)
+# Merge them for the polygons file
+polygons <- merge(start_ras,end_ras)
+plot(polygons)
+
+
+# TAke the centroids and rasterise them
+sources <- rasterize(centroids(start_v),lc_re, 
+             field=round(expanse(start_v, unit="km", transform=TRUE)) # make the area the current
+             )
+
+grounds <- rasterize(centroids(end_v),lc_re, 
+             field=1 # make the area the current
+             )
+
+
+library(terra)
+lc <- rast("data/Chapter4/os_raster_lc_10m.tif")
+
+# lets try a high res circuit scape  
+start <- focal_pa[focal_pa$NAME=="Corcovado",]
+end <- high_pa
+
+# Convert to a spatvect
+start <- as(start, "Spatial")
+start_v <- vect(start)
+end <- as(end, "Spatial")
+end_v <- vect(end)
+
+
+# DOWNSAMPLE TO MAKE THEM MANAGEABLE
+
+# Okay this is a no go right now
+lc_re_small <- aggregate(lc_re, fact=10, fun="modal")
+
+start_ras <- rasterize(start_v,lc_re_small, field=1)
+end_ras <- rasterize(end_v,lc_re_small, field=999)
+polygons <- merge(start_ras,end_ras)
+plot(polygons)
+sources <- rasterize(centroids(start_v),lc_re_small, 
+             field=round(expanse(start_v, unit="km", transform=TRUE))) # make the 
+
+grounds <- rasterize(centroids(end_v),lc_re_small, 
+             field=1) # make the area the current
+             
+lc_re_ras    <- as(lc_re_small,"Raster")
+polygons_ras <- as(polygons,"Raster")
+sources_ras    <- as(sources,"Raster")
+grounds_ras    <- as(grounds,"Raster")
+
+
+# Write the objects
+dir.create("Data/Chapter6/Osa_test_low_res")
+
+# Cell map
+writeRaster(lc_re_ras, "Data/Chapter6/Osa_test_low_res/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+# Source
+writeRaster(sources_ras, "Data/Chapter6/Osa_test_low_res/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+# Ground
+writeRaster(grounds_ras, "Data/Chapter6/Osa_test_low_res/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+# Polygon
+writeRaster(polygons_ras, "Data/Chapter6/Osa_test_low_res/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+dir.create("Data/Chapter6/Osa_test_low_res/output")
+
+
+res <- raster("Data/Chapter6/Osa_test_low_res/output/osa_hires_curmap.asc")
+plot(res, zlim=c(0,10))
+
+
+polygons <- end_ras
+plot(polygons)
+
+polygons_ras <- as(polygons,"Raster")
+
+# Polygon
+writeRaster(polygons_ras, "Data/Chapter6/Osa_test_low_res/regions_grid_point_source.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+
+dir.create("Data/Chapter6/Osa_test_low_res/output")
+
+
+res <- raster("Data/Chapter6/Osa_test_low_res/output/osa_hires_point_source_curmap.asc")
+plot(res, zlim=c(0,10))
+
+res <- raster("Data/Chapter6/Osa_test_low_res/output/osa_hires_point_source_cg_amg_curmap.asc")
+plot(res, zlim=c(0,10))
+
+```
+
+
+
