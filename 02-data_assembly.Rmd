@@ -1,7 +1,7 @@
 
 # Data assembly {#data-assembly}
 
-The following chapter details how we determined the area of interest and where we acquired the data products to be used in the connectivity analyses. We include justification of data sources where appropriate. 
+The following chapter details how we determined the area of interest and where we acquired the data products to be used in the connectivity analyses. We include justification of data sources where appropriate.  
 
 
 ```{r ch2_1, include=F}

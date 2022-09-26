@@ -13,3 +13,4 @@ data/
 *.rds
 *.RDS
 nul
+.RdataTmp
