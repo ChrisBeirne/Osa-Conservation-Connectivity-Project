@@ -469,7 +469,7 @@ The output below shows the application of 'circuitscape' to model the connectivi
 
 
 ```{r, echo=F}
-knitr::include_graphics("https://circuitscape.org/assets/img/Dutta.png")
+knitr::include_graphics("data/images/Dutta.PNG")
 ```
 
 
