@@ -14,3 +14,4 @@ data/
 *.RDS
 nul
 .RdataTmp
+.pdf

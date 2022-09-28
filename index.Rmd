@@ -14,6 +14,8 @@ bibliography: [book.bib, packages.bib]
 biblio-style: apalike
 link-citations: yes
 description: "An exploration of the ridge-to-reef connectivity of central America"
+classoption: oneside
+geometry: margin=0.5cm
 ---
 
 
@@ -39,15 +41,15 @@ Ultimately, this work demonstrates that we cannot take for granted that the rang
 ## Approach
 The approach we have taken in this report revolves around three key elements:
 
-- to produce a fully interactive dosument where users can see and explore the underlying data
+- to produce a fully interactive document where users can see and explore the underlying data
 - to use state of the art remote sensing layers and methodologies to explore connectivity (e.g. Google Earth Engine)
 - to provide actionable information for the design of corridors and directions of restoration activities
 
 It is important to note that all the assessments of connectivity here rely on habitat structural variables, rather than the movement or habitat selection of individual species, and should be interpreted as such. The surfaces will be most relevant to terrestrial, primary forest dwelling mammals.
 
-All of the data to reproduce the analysis and code in this report is stored, [in this location](https://drive.google.com/drive/folders/16WO_xH6B66D0dqyfeISHEB0mfU9cWWZg?usp=sharing). Email [Chris Beirne](c.w.beirne@gmail.com) for access. 
+All of the data to reproduce the analysis and code in this report is stored, [in this location](https://drive.google.com/drive/folders/1DQNtNzUbqjZsT1kXZGW2fzHFFf7Y7kcZ?usp=sharing). Email [Chris Beirne](c.w.beirne@gmail.com) for access. 
 
-All of the underlying code and data will ultimately be available on [GitHub](https://github.com/ChrisBeirne/Connectivity_Project). 
+All of the underlying code and data will ultimately be available on [GitHub](https://github.com/ChrisBeirne/Osa-Conservation-Connectivity-Project). 
 
 ## Report structure
 
@@ -67,73 +69,6 @@ Finally, high resolution land use maps should be produced for conservation and r
 ```{r, eval=F, include=F, echo=F}
 # To build the book
 bookdown::render_book("index.Rmd", "bookdown::gitbook")
-
-
-
-
-
-# NOPTES FOR THE INTRO
-
-## Justification:
-
-
-For the connectivity evaluation, our aim was to identify broad regions of habitat that have the
-potential to facilitate the movement of multiple species and maintain ecological processes.
-
-
-Land-use and land-cover changes have impacted the ability of many natural ecosystems to provide ecosystem goods and services for an ever-growing human population. This often has unintended consequences that may threaten biodiversity and ecosystem health.
-
-
-
-
-
- In the context of multi-functional land-use planning, there is growing interest in species-agnostic approaches, modelling connectivity as a function of human landscape modification. 
-
-
-
-**Elevational gradients**
-
-From: Elsen PR, Monahan WB, Merenlender AM (2018) Global patterns of protection of elevational gradients in mountain ranges. Proc Natl Acad Sci U S A 115:6004–6009. https://doi.org/10.1073/pnas.1720141115
-      This paper assess the within park elevational covergae. This goes a step further through analysisng the between park structural connectivity between reefs and ridges. They state: ". Ensuring conserva-tion outcomes for PAs with lower IUCN designations as well asstrategically placing PAs to better represent and connect elevationalgradients will enhance ecological representation and facilitate spe-cies range shifts under climate change." "  Enhancing pro-tection along elevational gradients may be particularly important, in mitigating biodiversity loss as climate change is projected tosimultaneously alter elevational distributions of agriculture (16),human populations (17), and natural resources (18). Despite ageneral understanding of the importance of protecting elevationalgradients for the maintenance of ecological and evolutionaryprocesses, we lack knowledge of where and how well elevationalgradients are protected at broad geographic scales." WOW!
-
-
-
-Key assumptions:
-
-We presume throughout that:
-
- The organism in question is on average minimizing its costs when moving through this matrix - an assumption possibly appropriate for terrestrial animals, and terrestrial animal-dispersed plants. Other animals will require different approaches.
-
-structural connectivity focuses only on landscape characteristics (e.g., movement corridors, barriers),
-
-
-NOTE - from corridorsdesign - "Our methods, together with the CorridorDesigner ArcGIS tools, are best suited for designing corridors in a heterogenous landscape at a regional (e.g. 2 - 500 km long) scale."
-
-The best way to conduct this may be through using the graph apporach to identify key least cost paths -> then exploding those with circuitscape into finer detail.
-
-
-## GREAT OVERVIEW: https://rdrr.io/cran/gdistance/f/vignettes/Overview.Rmd 
-
-
-https://onlinelibrary.wiley.com/doi/10.1111/geb.13456 
-
-
-
-Key tools for further readings:
-
-http://www.corridordesign.org/
-
-
-## Types of Connectivity - structural is important in this context
-
-From "Marrec R, Abdel Moniem HE, Iravani M, et al (2020) Conceptual framework and uncertainty analysis for large-scale, species-agnostic modelling of landscape connectivity across Alberta, Canada. Sci Rep 10:1–14. https://doi.org/10.1038/s41598-020-63545-z"
-
-"Natural ecosystems offer habitat for many species, and human landscape modification typically involves habitat loss as well as the breaking up of continuous habitats into smaller remnant patches (fragmentation)9,10. Consequently, landscapes may lose connectivity, i.e., the degree to which they facilitate movement of organisms and their genes among patches11,12. Landscape connectivity can be quantified in three ways: structural landscape connectivity, potential functional connectivity, and actual functional connectivity13. Structural landscape connectivity can be determined from physical attributes, based on maps alone without reference to organismal movement behaviour. Potential functional connectivity relies on a set of assumptions on organismal movement behaviour to implement an organism perspective, e.g. by mapping a species’ habitat and setting a dispersal threshold. In contrast, actual functional connectivity refers to observed data (e.g., patch occupancy, radio tracking, mark-recapture, or molecular genetic data) that reflect actual rates of the exchange of individuals (or their genes) and may be used to test models of structural or potential functional connectivity"
-
-"We argue that a species-agnostic approach is conceptually better suited for integrating landscape connectivity into land-use planning, whereas a focal-species approach is better suited for conservation management (Fig. 1). Understanding the difference between these perspectives can help clarify conceptual differences, guide researchers in making decisions about how to model connectivity, and inform practitioners about the potential and limitations of resulting maps. Conservation is often based on focal species, e.g., in species-at-risk management, where it is paramount to adopt an organism perspective60 to define critical habitat and to consider the organism’s ability to move between habitat patches. This will result in a model of potential functional connectivity for the specific organism of interest, and a multi-species model can be derived by overlaying models for a representative suite of species10,22. In contrast, land-use planning focuses on the sustainable development of multi-functional landscapes. In this human-centred perspective, land parcel ownership and administrative boundaries define the relevant spatial scale and the degree to which landscape development can be influenced by policy, which in the case of Alberta includes the introduction of ecosystem services and biodiversity markets that play a major role in balancing environmental considerations with socio-economic drivers59. Regarding landscape connectivity, the focus thus lies on how human landscape alteration affects the connectivity of the remaining natural heritage system and how to compare the expected effect of local development alternatives on larger-scale connectivity. This focus is highly compatible with the modelling of connectivity based on human modification, which will result in a model of structural landscape connectivity."
-
-
-
 
 ```
 

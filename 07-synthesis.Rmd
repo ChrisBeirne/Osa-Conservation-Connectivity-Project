@@ -104,7 +104,7 @@ addLegend(colors=c("red", "green"), labels = c("unprotected", "protected"),
 ```
 
 
-We estimate that (`r round(as.numeric(sum(st_area(high_pa_sf))/(1000*1000)),1)`)  km^2^ of high elevation (>1500m) forests are protected. However, substantial tracts of important forest remain unprotected (`r round(as.numeric(sum(st_area(high_forest_sf))/(1000*1000)),1) `) km^2^, the vast majority of such forests lie in Guatemala and Honduras. There appears to be limited potential for high elevation protected area expansion outside of these counties, although some expansions may be possible around La Amistad (Costa Rica and Panama). 
+We estimate that (`r as.character(round(as.numeric(sum(st_area(high_pa_sf))/(1000*1000)),1))`)  km^2^ of high elevation (>1500m) forests are protected. However, substantial tracts of important forest remain unprotected (`r as.character(round(as.numeric(sum(st_area(high_forest_sf))/(1000*1000)),1)) `) km^2^, the vast majority of such forests lie in Guatemala and Honduras. There appears to be limited potential for high elevation protected area expansion outside of these counties, although some expansions may be possible around La Amistad (Costa Rica and Panama). 
 
 ## Existing corridors
 Given that we have identified putative climate corridors, it follows that we should ask if these corridors are already covered by existing/proposed corridors. Below we explore the overlay of the Mesoamerican Biological Corridors (MBCs) with those identified in this mapping exercise.
