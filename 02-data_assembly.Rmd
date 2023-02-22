@@ -37,7 +37,9 @@ list.of.packages <- c("stars",
                       "MetBrewer",
                       "ggmap",
                       "kableExtra",
-                      "exactextractr")
+                      "exactextractr",
+                      "wdpar",
+                      "terra")
 
 # Check which ones you dont have
 new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
@@ -63,6 +65,10 @@ drive_auth()
 #rgee::ee_install_upgrade()
 
 #py_install("numpy")
+
+
+#rgee::ee_install_upgrade()
+reticulate::py_install('earthengine-api==0.1.323')#, envname='PUT_HERE_YOUR_PYENV')
 
 ee_Initialize()
 # Check things are working
@@ -106,7 +112,7 @@ for (i in seq_along(files$name)) {
 }
 
 
-# Download the low res fversion of Land cover map too
+# Download the low res version of Land cover map too
 
 jp_folder = "https://drive.google.com/drive/folders/1YYaJ01gIMD9qs8cxKYqWmPk_lzyStDWy"
 folder_id = drive_get(as_id(jp_folder))
@@ -145,11 +151,43 @@ focal_shp <- ms_filter_islands(
 
 merged_shp <- st_union(focal_shp)
 
+# Creater an exapnaded area for the "base aoi"
 
+all_countries <- ne_countries(returnclass = "sf", scale=10)
+
+# Use a 400km buffer for the base maps
+buff_shp <- st_buffer(merged_shp, 400000)
+#plot(buff_shp)
+#plot(st_geometry(all_shp),add=T)
+#plot(st_geometry(all_countries),add=T)
+
+# Intersect islands with buffer
+tmp <- st_intersection(all_countries, buff_shp)
+# Remove islands
+base_aoi <- ms_filter_islands(
+  tmp,
+  min_area = 12391399903,
+  drop_null_geometries = TRUE,
+  force_FC = TRUE,
+  sys_mem = 8
+)
+base_aoi <- st_union(base_aoi)
+
+
+#plot(st_geometry(base_aoi))
+#plot(st_geometry(tmp))
+#
 # Write these files
 st_write(all_shp,"data/spatial/area_of_interest/all_countries_islands.shp" )
 st_write(focal_shp,"data/spatial/area_of_interest/focal_countries.shp" )
 st_write(merged_shp, "data/spatial/area_of_interest/aoi.shp")
+st_write(base_aoi, "data/spatial/area_of_interest/base_aoi.shp", append=F)
+
+
+#plot(st_geometry(all_shp))
+#plot(st_geometry(focal_shp))
+#plot(st_geometry(merged_shp))
+
 
 ```
 
@@ -160,29 +198,49 @@ The full focal area spans:
 all_shp <- st_read("data/spatial/area_of_interest/all_countries_islands.shp", quiet = TRUE)
 focal_shp <- st_read("data/spatial/area_of_interest/focal_countries.shp", quiet = TRUE)
 merged_shp <- st_read("data/spatial/area_of_interest/aoi.shp", quiet = TRUE)
+base_shp <- st_read("data/spatial/area_of_interest/base_aoi.shp", quiet = TRUE)
+base_terra <- vect("data/spatial/area_of_interest/base_aoi.shp")
 
 
-leaflet(merged_shp) %>%  
+leaflet(base_shp) %>%  
     addPolygons(
-    stroke =T, color=met.brewer("Nizami")[2], 
+    stroke =T, color=met.brewer("Nizami")[4], 
     fillColor = met.brewer("Nizami")[4],
-    fillOpacity = 0, smoothFactor = 0.5) %>%
+    fillOpacity = 0.5, smoothFactor = 0.5) %>%
   addPolygons(data=focal_shp, label = focal_shp$name,
     stroke =T, color=met.brewer("Nizami")[2], 
-    fillColor = met.brewer("Nizami")[4],
-    fillOpacity = 0, smoothFactor = 0.5) %>% 
-  addProviderTiles("Esri.WorldPhysical")
+    fillColor = met.brewer("Nizami")[2],
+    fillOpacity = 0.5, smoothFactor = 0.5) %>% 
+  addProviderTiles("Esri.WorldPhysical") %>% 
+  addLegend(position="topright", labels=c("focal area", "simulated area"), colors=c(met.brewer("Nizami")[2], met.brewer("Nizami")[4]), title="Area of interest")
 
 # Setup the boundry for GEE
-mbc_bbox <- st_bbox(merged_shp)
+mbc_bbox <- st_bbox(base_shp) # changed from focal_shp
+
+(mbc_bbox[2]+mbc_bbox[4])/2
+#12.6 - have to go lower
+
+boundary_upper <- mbc_bbox
+boundary_lower <- mbc_bbox
+
+boundary_upper[2] <- 8
+boundary_lower[4] <- 8
 
 ```
+
+The area in orange is the region which we aquire data for, the red area represents the regions for which we explore the connectivity. The reason for the expansion is to minimise the possibility of edge effects. 
 
 
 ```{r  ch2_7, eval=F}
 # Subset using the area of interest
 focal <- ee$Geometry$Rectangle(as.numeric(st_bbox(mbc_bbox)))
 
+focal_upper <- ee$Geometry$Rectangle(as.numeric(st_bbox(boundary_upper)))
+focal_lower <- ee$Geometry$Rectangle(as.numeric(st_bbox(boundary_lower)))
+
+
+
+#Map.addLayer(focal)
 ```
 
 
@@ -222,73 +280,187 @@ We buffered the area of interest by 10km, then excluded any protected ares which
 
 As recommended in the WDPA best practices guide, we removed any PA that did not report its area, or with a ‘Proposed’ status or ‘UNESCO-MAB Biosphere Reserve’ designation (Note core areas remain under national park designations).
 
+We now also use the package `wdpar` to clean known issues in the database (i.e. filter out overlapping sections).
+
 ```{r  ch2_10, echo=F, eval=F}
 gpa  <- ee$FeatureCollection("WCMC/WDPA/current/polygons")
-gpa_filtered <- gpa$filterBounds(focal)
-gpa_shp <- ee_as_sf(gpa_filtered)    
 
-# Remove the regional designations
-gpa_shp <- gpa_shp[gpa_shp$DESIG!="Regional",]
-plot(st_geometry(gpa_shp))
-# Remove parks without areas
-gpa_shp <- gpa_shp[gpa_shp$GIS_AREA>0.01,]
-summary(gpa_shp$GIS_AREA)
-# Remove Proposed status
-gpa_shp <- gpa_shp[gpa_shp$STATUS!="Proposed",]
-# Remove UNESCO-MAB Biosphere Reserve
-gpa_filtered <- gpa_shp[gpa_shp$DESIG!="UNESCO-MAB Biosphere Reserve",]
-plot(st_geometry(gpa_filtered))
+gpa_upper <- gpa$filterBounds(focal_upper)
+gpa_lower <- gpa$filterBounds(focal_lower)
 
-# Remove known duplicated
-# Rio Platano
-gpa_filtered <- gpa_filtered[gpa_filtered$NAME != "Laguna de Términos",]
-gpa_filtered <- gpa_filtered[gpa_filtered$NAME != "Patanos de Centia",]
-gpa_filtered <- gpa_filtered[gpa_filtered$NAME != "Darien National Park",]
-gpa_filtered <- gpa_filtered[gpa_filtered$NAME != "Los Katios",]
-gpa_filtered <- gpa_filtered[gpa_filtered$NAME != "Talamanca Range-La Amistad Reserves / La Amistad National Park",]
+#Veiw on google earth
+#Map$setCenter(-85, 10, 4)
+#Map$addLayer(gpa_upper)
+Map$addLayer(gpa)
 
-gpa_filtered <- gpa_filtered[gpa_filtered$NAME != "Turberas de Talamanca",]
-gpa_filtered <- gpa_filtered[gpa_filtered$NAME != "Sistema de Humedales de la Bahía de Bluefields",]
-gpa_filtered <- gpa_filtered[gpa_filtered$NAME != "Complejo Bahía de Jiquilisco",]
-gpa_filtered <- gpa_filtered[gpa_filtered$NAME != "Río Plátano Biosphere Reserve",]
+# My layer is too large to convert to sf without filtering
+# Filter to get only larger continental US watersheds.
+#gpa_filtered$filter(ee$gpa_filtered$gt("areasqkm", 25000))
 
-gpa_filtered <- gpa_filtered[gpa_filtered$NAME != "Corredor Fronterizo",]
+gpa_upper_shp <- ee_as_sf(gpa_upper)    
+gpa_lower_shp <- ee_as_sf(gpa_lower)    
 
+gpa_shp <- rbind(gpa_upper_shp, gpa_lower_shp)
 
-# Temp
-#gpa_filtered <- gpa_filtered[gpa_filtered$NAME != "Tapanti-Macizo de la Muerte",]
-#
+library(wdpar)
 
-	
+gpa_clean <- wdpa_clean(
+  gpa_shp,
+  crs = paste("+proj=cea +lon_0=0 +lat_ts=30 +x_0=0",
+    "+y_0=0 +datum=WGS84 +ellps=WGS84 +units=m +no_defs"),
+  exclude_unesco = TRUE,
+  retain_status = c("Designated", "Inscribed", "Established"),
+  snap_tolerance = 1,
+  simplify_tolerance = 0,
+  geometry_precision = 1500,
+  erase_overlaps = TRUE,
+  verbose = interactive()
+)
 
-# temp 	
-# New idea, order by name and size, if duplicated take the first
-gpa_filtered <- gpa_filtered[order(gpa_filtered$NAME, gpa_filtered$GIS_AREA, decreasing = T),]
-
-#gpa_filtered[gpa_filtered$NAME=="Golfo de Montijo",]
-gpa_filtered <- gpa_filtered[duplicated(gpa_filtered$NAME)==F,]
+gpa_clean <- st_transform(gpa_clean, 4326)
 
 
 leaflet() %>%
   addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
   addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
-  addPolygons(data=gpa_filtered[st_geometry_type(gpa_filtered)!="GEOMETRYCOLLECTION",], fillColor = "blue",
-               label = gpa_filtered$NAME[st_geometry_type(gpa_filtered)!="GEOMETRYCOLLECTION"], group="Protected areas", stroke=F) %>%
+  addPolygons(data=gpa_clean, fillColor = "blue",
+               label = gpa_clean$NAME, group="Protected areas", stroke=T) %>%
   addLayersControl(
     baseGroups = c("OSM (default)", "Satellite"),
     overlayGroups = c("Protected areas"))
 
 
+# 
+# # Remove duplicated geometries
+# gpa_clean <- gpa_clean[duplicated(gpa_clean$NAME)==F,]
+# # Remove the regional designations
+# gpa_clean <- gpa_clean[gpa_clean$DESIG!="Regional",]
+# 
+# # Remove those that are not terrestrial - 10km of land
+# gpa_ter <- gpa_clean[(gpa_clean$GIS_AREA-gpa_clean$GIS_M_AREA)>0,]
+# 
+# # Remove parks without areas
+# gpa_ter <- gpa_ter[gpa_ter$GIS_AREA>0.01,]
+# 
+# # Calculate terrestrial area
+# gpa_ter$GIS_T_AREA <- gpa_ter$GIS_AREA -  gpa_ter$GIS_M_AREA
+# 
+# summary(gpa_ter$GIS_AREA)
+# summary(gpa_ter$GIS_T_AREA)
+# 
+# # Remove Proposed status
+# gpa_ter <- gpa_ter[gpa_ter$STATUS!="Proposed",]
+# 
+# # Remove UNESCO-MAB Biosphere Reserve
+# gpa_filtered <- gpa_ter[gpa_ter$DESIG!="UNESCO-MAB Biosphere Reserve",]
+# plot(st_geometry(gpa_filtered))
+# 
+# # Remove known duplicated
+# # Rio Platano
+# gpa_filtered <- gpa_filtered[gpa_filtered$NAME != "Laguna de Términos",]
+# gpa_filtered <- gpa_filtered[gpa_filtered$NAME != "Patanos de Centia",]
+# gpa_filtered <- gpa_filtered[gpa_filtered$NAME != "Darien National Park",]
+# gpa_filtered <- gpa_filtered[gpa_filtered$NAME != "Los Katios",]
+# gpa_filtered <- gpa_filtered[gpa_filtered$NAME != "Talamanca Range-La Amistad Reserves / La Amistad National Park",]
+# 
+# gpa_filtered <- gpa_filtered[gpa_filtered$NAME != "Turberas de Talamanca",]
+# gpa_filtered <- gpa_filtered[gpa_filtered$NAME != "Sistema de Humedales de la Bahía de Bluefields",]
+# gpa_filtered <- gpa_filtered[gpa_filtered$NAME != "Complejo Bahía de Jiquilisco",]
+# gpa_filtered <- gpa_filtered[gpa_filtered$NAME != "Río Plátano Biosphere Reserve",]
+# 
+# gpa_filtered <- gpa_filtered[gpa_filtered$NAME != "Corredor Fronterizo",]
+# 
+# 
+# # Temp
+# #gpa_filtered <- gpa_filtered[gpa_filtered$NAME != "Tapanti-Macizo de la Muerte",]
+# #
+# 
+# 	
+# 
+# # temp 	
+# # New idea, order by name and size, if duplicated take the first
+# gpa_filtered <- gpa_filtered[order(gpa_filtered$NAME, gpa_filtered$GIS_AREA, decreasing = T),]
+# 
+# #gpa_filtered[gpa_filtered$NAME=="Golfo de Montijo",]
+# gpa_filtered <- gpa_filtered[duplicated(gpa_filtered$NAME)==F,]
+# 
+# 
+# leaflet() %>%
+#   addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+#   addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+#   addPolygons(data=gpa_filtered[st_geometry_type(gpa_filtered)!="GEOMETRYCOLLECTION",], fillColor = "blue",
+#                label = gpa_filtered$NAME[st_geometry_type(gpa_filtered)!="GEOMETRYCOLLECTION"], group="Protected areas", stroke=T) %>%
+#   addLayersControl(
+#     baseGroups = c("OSM (default)", "Satellite"),
+#     overlayGroups = c("Protected areas"))
+# 
+# leaflet() %>%
+#   addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+#   addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+#   addPolygons(data=gpa_clean, fillColor = "blue",
+#                label = gpa_clean$NAME, group="Protected areas", stroke=T) %>%
+#   addLayersControl(
+#     baseGroups = c("OSM (default)", "Satellite"),
+#     overlayGroups = c("Protected areas"))
+# 
+# 
+# # CAN I MEGRE OVERLAPPING POLYGONS
+# 
+# st_overlaps(gpa_filtered, sparse=F)
+# ?st_overlaps
+
+# Subset to focal protected areas
+
 tmp <- st_transform(merged_shp,3160)
-tmp2 <- st_buffer(tmp,10000)
+tmp2 <- st_buffer(tmp,50)
 #plot(st_geometry(tmp))
 #plot(st_geometry(tmp2))
 tmp2 <- st_transform(tmp2, 4326)
 
-focal_pa <- st_intersection(gpa_filtered, tmp2)
-focal_pa <- st_make_valid(focal_pa)
+gpa_clean <- st_make_valid(gpa_clean)
+sf_use_s2(FALSE)
+gpa_clean <- sf::st_buffer(gpa_clean, dist = 0)
 
+
+# Interset with the core area
+#focal_pa <- st_intersection(gpa_clean, tmp2)
+focal_pa <- st_intersection(gpa_clean, merged_shp)
 plot(st_geometry(focal_pa))
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addPolygons(data=focal_pa, fillColor = "blue",
+               label = focal_pa$NAME, group="Protected areas", stroke=T) %>%
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Protected areas"))
+
+?st_area
+#hist(st_area(focal_pa)/(1000000))
+table(as.numeric(st_area(focal_pa)/(1000000))<0.5)
+
+focal_pa <- focal_pa[as.numeric(st_area(focal_pa)/(1000000))>0.5,]
+
+# Remove the weird coastal small shit
+
+focal_pa <- focal_pa[!(focal_pa$NAME %in% c( "Complejo Los Cóbanos", "Playa Boca Vieja", 	
+"Manglares de Panamá Viejo", "Nacional Cariari", "Cayos Perlas", "Port Honduras", "Corozal Bay")),]
+
+# There are two Alto darien's - remove other duplicates
+focal_pa <- focal_pa[duplicated(focal_pa)==F,]
+focal_pa <- focal_pa[duplicated(focal_pa$geometry)==F,]
+
+# leaflet() %>%
+#   addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+#   addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+#   addPolygons(data=focal_pa, fillColor = "blue",
+#                label = focal_test$NAME, group="Protected areas", stroke=T) %>%
+#   addLayersControl(
+#     baseGroups = c("OSM (default)", "Satellite"),
+#     overlayGroups = c("Protected areas"))
+
+
 #test <- st_combine(focal_pa, by_feature=T)
 # ?st_combine
 # ?st_cast
@@ -345,11 +517,7 @@ leaflet() %>%
 Within our focal area, the WPDA dataset includes the following number of terrestrial and marine protected areas:
 
 ```{r  ch2_12, echo=F}
-tmp <- data.frame(table(focal_pa$MARINE>0))
-colnames(tmp) <- c("Type", "Freq")
-tmp$Type <- as.character(tmp$Type)
-tmp$Type[tmp$Type==FALSE] <- "Terrestrial"
-tmp$Type[tmp$Type==TRUE] <- "Marine"
+tmp <- as.data.frame(table(focal_pa$MARINE))
 tmp  %>%
   kbl() %>%
   kable_styling()
@@ -368,19 +536,6 @@ tmp  %>%
 
 ```
 
-#### Marine protected areas
-We will also use marine protected areas as our connectivity start points ("focal nodes"). Note - not all of these protected areas are fully marine, some span land and sea. 
-
-```{r  ch2_14}
-plot(st_geometry(merged_shp), col=rgb(0,0,0,0.1), border=F)
-plot(st_geometry(focal_pa[focal_pa$MARINE==1,]), col=met.brewer("Nizami")[4], add=T)
-#plot(st_geometry(focal_pa[focal_pa$DESIG_TYPE=="National",]), col=met.brewer("Nizami")[6], add=T)
-#plot(st_geometry(merged_shp), col=rgb(0,0,0), border=F, add=T)
-
-legend("topright", c("Marine"), pch=15, col=c(met.brewer("Nizami")[4]))
-
-```
-
 ### Elevation
 We downloaded the elevation of the area of interest using SRTM Digital Elevation Data Version 4. The Shuttle Radar Topography Mission (SRTM) digital elevation dataset was originally produced to provide consistent, high-quality elevation data at near global scope. 
 
@@ -390,13 +545,32 @@ dem <- ee$Image("CGIAR/SRTM90_V4")
 #Map$setCenter(-122.1899, 37.5010, 10)
 #Map$addLayer(dem)
 #focal
+
+#      xmin       ymin       xmax       ymax 
+#-96.067919   3.645258 -73.465162  21.623440 
+
+(3.645258 + 21.623440)/2
+
+# Upper
 geom_params <-   list(
   scale = 400,
   crs = 'EPSG:4326',
-  region = '[[-92.246257 , 7.205715], [-77.163270, 7.205715], [-77.163270, 18.490759], [-92.246257 , 18.490759]]'
+  region = '[[-96.067919 , 3.645258], [-73.465162, 3.645258], [-73.465162, 12.6], [-96.067919 , 12.6]]'
 )
 path <- dem$getDownloadUrl(geom_params)
-# sAVE THE FILE TO YOUR GOOGLE DRIVE MANUALLY (DONE)
+
+# SAVE THE FILES TO YOUR GOOGLE DRIVE MANUALLY (DONE)
+
+# Lower
+geom_params <-   list(
+  scale = 400,
+  crs = 'EPSG:4326',
+  region = '[[-96.067919 , 12.6], [-73.465162, 12.6], [-73.465162, 21.623440], [-96.067919 , 21.623440]]'
+)
+path <- dem$getDownloadUrl(geom_params)
+
+
+
 remove(dem)
 ```
 
@@ -404,13 +578,32 @@ remove(dem)
 ```{r ch2_16}
 # First time run
 
+# Read in upper
+#dem_raster1 <- read_stars("data/spatial/SRTM90_V4/SRTM90_V4.elevation_upper.tif")
+# Read in lower
+#dem_raster2 <- read_stars("data/spatial/SRTM90_V4/SRTM90_V4.elevation_lower.tif")
+
+# Stitch together
+#dem_raster <- st_mosaic(dem_raster1, dem_raster2)
+
 # dem_raster <- read_stars("data/spatial/SRTM90_V4/SRTM90_V4.elevation.tif")
 # # Mask out the areas you are not interested in
-# dem_raster <- st_crop(dem_raster, merged_shp)
-# write_stars(dem_raster, "data/spatial/SRTM90_V4/SRTM90_V4.elevation.tif")
+#dem_raster <- st_crop(dem_raster, base_shp)
+# plot(dem_raster)
 
-dem_raster <- read_stars("data/spatial/SRTM90_V4/SRTM90_V4.elevation.tif")
-plot(dem_raster, las=1,nbreaks=11 ,breaks="equal", col=terrain.colors(10), bg="grey", main="")
+# write_stars(dem_raster, "data/spatial/SRTM90_V4/SRTM90_V4.elevation_all.tif")
+library(terra)
+dem_raster <- rast("data/spatial/SRTM90_V4/SRTM90_V4.elevation_all.tif")
+dem_crop <- mask(dem_raster, base_terra)
+writeRaster(dem_crop, "data/spatial/SRTM90_V4/SRTM90_V4.elevation_mask.tif")
+plot(dem_crop)
+
+# # Mask out the areas you are not interested in
+# gfc_2020 <- st_crop(gfc_2020, base_shp)
+# write_stars(gfc_2020, "data/spatial/gfc/global_forest_change_2020_v1_8.treecover2000.tif")
+
+#dem_raster <- read_stars("data/spatial/SRTM90_V4/SRTM90_V4.elevation.tif")
+#plot(dem_raster, las=1,nbreaks=11 ,breaks="equal", col=terrain.colors(10), bg="grey", main="")
 ```
 
 Data source: [Jarvis, A., H.I. Reuter, A. Nelson, E. Guevara. 2008. Hole-filled SRTM for the globe Version 4, available from the CGIAR-CSI SRTM 90m Database](https://srtm.csi.cgiar.org).
@@ -459,10 +652,24 @@ Map$addLayer(
       palette = c('white','green')),
     name = 'Forest cover')
 
+#      xmin       ymin       xmax       ymax 
+#-96.067919   3.645258 -73.465162  21.623440 
+
+# Lower
 geom_params <-   list(
   scale = 400,
   crs = 'EPSG:4326',
-  region = '[[-92.246257 , 7.205715], [-77.163270, 7.205715], [-77.163270, 18.490759], [-92.246257 , 18.490759]]'
+  region = '[[-96.067919 , 3.645258], [-73.465162, 3.645258], [-73.465162, 12.6], [-96.067919 , 12.6]]'
+)
+path <- gfc_remain[["treecover2000"]]$getDownloadUrl(geom_params)
+
+# SAVE THE FILES TO YOUR GOOGLE DRIVE MANUALLY (DONE)
+
+# Upper
+geom_params <-   list(
+  scale = 400,
+  crs = 'EPSG:4326',
+  region = '[[-96.067919 , 12.6], [-73.465162, 12.6], [-73.465162, 21.623440], [-96.067919 , 21.623440]]'
 )
 path <- gfc_remain[["treecover2000"]]$getDownloadUrl(geom_params)
 
@@ -475,15 +682,16 @@ path <- gfc_remain[["treecover2000"]]$getDownloadUrl(geom_params)
 ```
 
 ```{r  ch2_18}
-# gfc_2020 <- read_stars("data/spatial/gfc/global_forest_change_2020_v1_8.treecover2000.tif")
-# # Mask out the areas you are not interested in
-# gfc_2020 <- st_crop(gfc_2020, merged_shp)
-# write_stars(gfc_2020, "data/spatial/gfc/global_forest_change_2020_v1_8.treecover2000.tif")
+# Run hashed files the first time only
+# gfc_2020_upper <- rast("data/spatial/gfc/global_forest_change_2021_v1_9.treecover2000_upper.tif")
+# gfc_2020_lower <- rast("data/spatial/gfc/global_forest_change_2021_v1_9.treecover2000_lower.tif")
+# m2 <- mosaic(gfc_2020_upper, gfc_2020_lower)
+# gfc2020 <- mask(m2, base_terra)
+# plot(gfc2020)
+# writeRaster(gfc2020, "data/spatial/gfc/global_forest_change_2021_v1_9.treecover2000.tif")
 
-
-gfc_2020 <- read_stars("data/spatial/gfc/global_forest_change_2021_v1_9.treecover2000.tif")
-plot(gfc_2020, las=1,nbreaks=11 ,breaks="equal", col=rev(terrain.colors(10)), bg="grey", main="")
-
+gfc_2020 <- rast("data/spatial/gfc/global_forest_change_2021_v1_9.treecover2000.tif")
+plot(gfc_2020)
 
 ```
 
@@ -512,7 +720,13 @@ test <- ee_imagecollection_to_local(
   scale = NULL,
   maxPixels = 1e+09
 )
+drive_auth()
 
+
+
+?ee_imagecollection_to_local
+drive_auth(email = "c.w.beirne@gmail.com")
+#drive_auth()
 nasa_biomass <- read_stars("data/spatial/biomass/NASA_biomass_desnity_estimation.tif")
 # Mask out the areas you are not interested in
 nasa_biomass <- st_crop(nasa_biomass, merged_shp)

@@ -1,7 +1,7 @@
 --- 
 title: "Connectivity modelling: an exploration of the ridge-to-reef connectivity of central America"
-subtitle: "Final Report"
-date: "`September 2022`"
+subtitle: "Project update"
+date: "`February 2023`"
 site: bookdown::bookdown_site
 output:
   bookdown::gitbook: 
@@ -55,9 +55,9 @@ All of the underlying code and data will ultimately be available on [GitHub](htt
 
 The structure of the report follows the statement of work outlined in the research agreement:
 
-1) Assemble of data sets at the appropriate scale and resolution to be included in the connectivity analysis (see the [data assembly chapter](#data-assembly).
+1) Assemble of data sets at the appropriate scale and resolution to be included in the connectivity analysis (see the [data assembly chapter](#data-assembly)).
 
-2) Integrate remote sensed layers of habitat state and land-use into different cost surfaces (capturing barriers to wildlife movement) across the focal landscapes (see the [resistance surface chapter](#cost-surface). 
+2) Integrate remote sensed layers of habitat state and land-use into different cost surfaces (capturing barriers to wildlife movement) across the focal landscapes (see the [resistance surface chapter](#cost-surface)). 
 
 3) Run simulations exploring the degree of connectivity between specified low and high elevation protected areas (‘nodes’), using the different cost-surface scenarios (see the [least cost paths](#lcp) and [circuitscape](#circuitscape) chapters). 
 
