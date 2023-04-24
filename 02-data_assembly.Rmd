@@ -68,9 +68,9 @@ drive_auth()
 
 
 #rgee::ee_install_upgrade()
-reticulate::py_install('earthengine-api==0.1.323')#, envname='PUT_HERE_YOUR_PYENV')
+#reticulate::py_install('earthengine-api==0.1.323')#, envname='PUT_HERE_YOUR_PYENV')
 
-ee_Initialize()
+ee_Initialize(user="c.w.beirne", drive=T)
 # Check things are working
 ee_check()
 # Second text
@@ -171,6 +171,8 @@ base_aoi <- ms_filter_islands(
   force_FC = TRUE,
   sys_mem = 8
 )
+st_write(base_aoi, "data/spatial/area_of_interest/all_countries_expanded.shp")
+
 base_aoi <- st_union(base_aoi)
 
 
@@ -199,8 +201,8 @@ all_shp <- st_read("data/spatial/area_of_interest/all_countries_islands.shp", qu
 focal_shp <- st_read("data/spatial/area_of_interest/focal_countries.shp", quiet = TRUE)
 merged_shp <- st_read("data/spatial/area_of_interest/aoi.shp", quiet = TRUE)
 base_shp <- st_read("data/spatial/area_of_interest/base_aoi.shp", quiet = TRUE)
-base_terra <- vect("data/spatial/area_of_interest/base_aoi.shp")
-
+base_terra <- vect("data/spatial/area_of_interest/base_aoi.shp", crs="epsg:4326")
+plot(base_terra)
 
 leaflet(base_shp) %>%  
     addPolygons(
@@ -425,7 +427,10 @@ gpa_clean <- sf::st_buffer(gpa_clean, dist = 0)
 # Interset with the core area
 #focal_pa <- st_intersection(gpa_clean, tmp2)
 focal_pa <- st_intersection(gpa_clean, merged_shp)
-plot(st_geometry(focal_pa))
+#plot(st_geometry(focal_pa))
+all_pa <- st_intersection(gpa_clean, base_shp)
+#plot(st_geometry(all_pa))
+
 
 leaflet() %>%
   addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
@@ -436,7 +441,6 @@ leaflet() %>%
     baseGroups = c("OSM (default)", "Satellite"),
     overlayGroups = c("Protected areas"))
 
-?st_area
 #hist(st_area(focal_pa)/(1000000))
 table(as.numeric(st_area(focal_pa)/(1000000))<0.5)
 
@@ -480,14 +484,29 @@ focal_pa <- focal_pa[duplicated(focal_pa$geometry)==F,]
 # Store this file
 dir.create("data/spatial/WDPA_protected_areas")
 saveRDS(focal_pa, "data/spatial/WDPA_protected_areas/focal_area_pa_shp.RDS")
+saveRDS(all_pa, "data/spatial/WDPA_protected_areas/all_area_pa_shp.RDS")
+
 
 drive_upload("data/spatial/WDPA_protected_areas/focal_area_pa_shp.RDS", as_id("https://drive.google.com/drive/u/0/folders/1KgNuMrKPyskUmroOBGISt3FxAsaBLmRv"))
+
+drive_upload("data/spatial/WDPA_protected_areas/all_area_pa_shp.RDS", as_id("https://drive.google.com/drive/u/0/folders/1KgNuMrKPyskUmroOBGISt3FxAsaBLmRv"))
 
 ```
 
 ```{r  ch2_11}
 # Plot
 focal_pa <- readRDS( "data/spatial/WDPA_protected_areas/focal_area_pa_shp.RDS")
+all_pa <- readRDS( "data/spatial/WDPA_protected_areas/all_area_pa_shp.RDS")
+
+# Remove corredor fronterizo
+focal_pa <- focal_pa[focal_pa$NAME!="Corredor Fronterizo",]
+focal_pa <- focal_pa[focal_pa$NAME!="Palo Verde",]
+focal_pa <- focal_pa[focal_pa$NAME!="Riberino Zapandi",]
+
+saveRDS(focal_pa, "data/spatial/WDPA_protected_areas/focal_area_pa_shp.RDS")
+
+drive_upload("data/spatial/WDPA_protected_areas/focal_area_pa_shp.RDS", as_id("https://drive.google.com/drive/u/0/folders/1KgNuMrKPyskUmroOBGISt3FxAsaBLmRv"))
+
 plot(st_geometry(merged_shp), col=rgb(0,0,0,0.1), border=F)
 plot(st_geometry(focal_pa[focal_pa$DESIG_TYPE=="International",]), col=met.brewer("Nizami")[1], add=T)
 plot(st_geometry(focal_pa[focal_pa$DESIG_TYPE=="National",]), col=met.brewer("Nizami")[6], add=T)
@@ -592,10 +611,13 @@ remove(dem)
 # plot(dem_raster)
 
 # write_stars(dem_raster, "data/spatial/SRTM90_V4/SRTM90_V4.elevation_all.tif")
-library(terra)
-dem_raster <- rast("data/spatial/SRTM90_V4/SRTM90_V4.elevation_all.tif")
-dem_crop <- mask(dem_raster, base_terra)
-writeRaster(dem_crop, "data/spatial/SRTM90_V4/SRTM90_V4.elevation_mask.tif")
+#library(terra)
+#dem_raster <- rast("data/spatial/SRTM90_V4/SRTM90_V4.elevation_all.tif")
+#dem_crop <- mask(dem_raster, base_terra)
+#writeRaster(dem_crop, "data/spatial/SRTM90_V4/SRTM90_V4.elevation_mask.tif")
+
+
+dem_crop <- rast("data/spatial/SRTM90_V4/SRTM90_V4.elevation_mask.tif")
 plot(dem_crop)
 
 # # Mask out the areas you are not interested in
@@ -709,6 +731,8 @@ The values represent above-ground living biomass carbon stock density of combine
 
 ```{r  ch2_19, include=F, eval=F}
 # First run only 
+
+drive_auth(use_oob = TRUE)
 biomass <- ee$ImageCollection("NASA/ORNL/biomass_carbon_density/v1")
 test <- biomass$select("agb")
 test <- ee_imagecollection_to_local(
@@ -720,23 +744,18 @@ test <- ee_imagecollection_to_local(
   scale = NULL,
   maxPixels = 1e+09
 )
-drive_auth()
 
-
-
-?ee_imagecollection_to_local
-drive_auth(email = "c.w.beirne@gmail.com")
-#drive_auth()
-nasa_biomass <- read_stars("data/spatial/biomass/NASA_biomass_desnity_estimation.tif")
+nasa_biomass <- rast("data/spatial/biomass/NASA_biomass_desnity_estimation.tif")
 # Mask out the areas you are not interested in
-nasa_biomass <- st_crop(nasa_biomass, merged_shp)
-write_stars(nasa_biomass, "data/spatial/biomass/NASA_biomass_desnity_estimation.tif")
+nasa_biomass <- mask(nasa_biomass, base_terra)
+plot(nasa_biomass)
+writeRaster(nasa_biomass, "data/spatial/biomass/NASA_biomass_desnity_estimation.tif", overwrite=T)
 
 ```
 
 ```{r ch2_20}
-nasa_biomass <- read_stars("data/spatial/biomass/NASA_biomass_desnity_estimation.tif")
-plot(nasa_biomass, las=1,nbreaks=11 ,breaks="equal", col=rev(terrain.colors(10)), bg="grey", main="")
+nasa_biomass <- rast("data/spatial/biomass/NASA_biomass_desnity_estimation.tif")
+plot(nasa_biomass)
 ```
 
 ### Forest height
@@ -746,25 +765,41 @@ For forest height we use the global 2005 dataset  representing global tree heigh
 
 ```{r  ch2_21, include=F, eval=F}
 height <- ee$Image("NASA/JPL/global_forest_canopy_height_2005")
+
+# Lower
 geom_params <-   list(
   scale = 400,
   crs = 'EPSG:4326',
-  region = '[[-92.246257 , 7.205715], [-77.163270, 7.205715], [-77.163270, 18.490759], [-92.246257 , 18.490759]]'
+  region = '[[-96.067919 , 3.645258], [-73.465162, 3.645258], [-73.465162, 12.6], [-96.067919 , 12.6]]'
 )
 path <- height$getDownloadUrl(geom_params)
-# sAVE THE FILE TO YOUR GOOGLE DRIVE MANUALLY (DONE)
-remove(dem)
 
-height <- read_stars("data/spatial/height/global_forest_canopy_height_2005.1.tif")
-# Mask out the areas you are not interested in
-height <- st_crop(height, merged_shp)
-write_stars(height, "data/spatial/height/global_forest_canopy_height_2005.1.tif")
+# SAVE THE FILES TO YOUR GOOGLE DRIVE MANUALLY (DONE)
+
+# Upper
+geom_params <-   list(
+  scale = 400,
+  crs = 'EPSG:4326',
+  region = '[[-96.067919 , 12.6], [-73.465162, 12.6], [-73.465162, 21.623440], [-96.067919 , 21.623440]]'
+)
+path <- height$getDownloadUrl(geom_params)
+
+# sAVE THE FILE TO YOUR GOOGLE DRIVE MANUALLY (DONE)
+
+# Run hashed files the first time only
+# height_upper <- rast("data/spatial/height/global_forest_canopy_height_2005.1_upper.tif")
+# height_lower <- rast("data/spatial/height/global_forest_canopy_height_2005_lower.1.tif")
+# m2 <- mosaic(height_upper, height_lower)
+# height <- mask(m2, base_terra)
+# plot(height)
+# writeRaster(height, "data/spatial/height/global_forest_canopy_height_2005.1.tif", overwrite=T)
+
 ```
 
 
 ```{r ch2_22}
-height <- read_stars("data/spatial/height/global_forest_canopy_height_2005.1.tif")
-plot(height, las=1,nbreaks=11 ,breaks="equal", col=rev(terrain.colors(10)), bg="grey", main="")
+height <- rast("data/spatial/height/global_forest_canopy_height_2005.1.tif")
+plot(height)
 
 ```
 
@@ -831,14 +866,13 @@ test <- ee_imagecollection_to_local(
 
 ```{r ch2_26}
 # First time run
-# ghm_raster <- read_stars("data/spatial/human_modification_index/gHM_2016.tif")
-# # Mask out the areas you are not interested in
-# ghm_raster <- st_crop(ghm_raster, merged_shp)
-# write_stars(ghm_raster, "data/spatial/human_modification_index/gHM_2016.tif")
+# ghm_raster <- rast("data/spatial/human_modification_index/gHM_2016.tif")
+# ghm <- mask(ghm_raster, base_terra)
+# plot(ghm)
+# writeRaster(ghm, "data/spatial/human_modification_index/gHM_2016.tif", overwrite=T)
 
-ghm_raster <- read_stars("data/spatial/human_modification_index/gHM_2016.tif")
-
-plot(ghm_raster, las=1,nbreaks=11 ,breaks="equal", col=terrain.colors(10), bg="grey")
+ghm_raster <- rast("data/spatial/human_modification_index/gHM_2016.tif")
+plot(ghm_raster)
 
 ```
 
@@ -851,27 +885,68 @@ Examples of papers usuing the human modification index (or a derivation of it):
 
 ### Current land-use and habitat
 
-To capture land use, we are used the high resolution (10m) land cover map over Mexico and Central America created by ESA. The data are based on more than 2 years of Sentinel-2A and 2B observations from January 2016 to March 2018.
+To capture land use, we are used the high resolution (10m) land cover map over Mexico and Central America created by ESA (ESA/WorldCover/v200). The data are based on more than 2 years of Sentinel-2A and 2B observations from January 2016 to March 2018.
+
+```{r, eval=F}
+# Other option
+
+lcc <- ee$ImageCollection("ESA/WorldCover/v200")
+test <- ee_imagecollection_to_local(
+  lcc,
+  region = focal,
+  dsn = NULL,
+  via = "drive",
+  container = "rgee_backup",
+  scale = 100,
+  maxPixels = 6e+10
+)
+to_import <- list.files("data/spatial/landcover/v2_global/", full=T)
+r1 <- rast(to_import[1])
+
+dem_crop <- mask(dem_raster, base_terra)
+# lcc <- mask(r1, base_terra)
+# plot(lcc)
+# writeRaster(lcc, "data/spatial/landcover/ESACCI-global-10m.tif", overwrite=T)
+
+raster_files <- list.files("data/spatial/landcover/v2_global", full.names=T)
+test <- terra::vrt(raster_files, "data/spatial/landcover/virtual_raster", overwrite=T) 
+
+r1<- rast(to_import[1])
+r1_sub <- aggregate(r1,factor=10)
+r2<- rast(to_import[2])
+r2_sub <- aggregate(r2,factor=10)
+test <- terra::mosaic(r1_sub,r2_sub)
+
+writeRaster(test, "data/spatial/landcover/test.tif")
+
+
+
+
+```
 
 
 ```{r  ch2_27, echo=F}
-lc_raster <- read_stars("data/spatial/landcover/ESACCI-LC-L4-LC10-Map-10m-CAM.tif")
-lc_key <- read.csv("data/spatial/landcover/ESACCI-LC_S2_Prototype_ColorLegend.csv", header=T, sep=";")
-lc_key$rgb <- rgb(lc_key$R/256,lc_key$G/256,lc_key$B/256)
-# Remove no data
-lc_key <- lc_key[1:11,]
-# Simplify labels
-lc_key$LCCOwnLabel[lc_key$LCCOwnLabel=="Tree cover areas"] <- "Tree cover"
-lc_key$LCCOwnLabel[lc_key$LCCOwnLabel=="Shrubs cover areas"] <- "Shrub cover"
-lc_key$LCCOwnLabel[lc_key$LCCOwnLabel=="Vegetation aquatic or regularly flooded"] <- "Flooded vegetation"
+lc_raster <- rast("data/spatial/landcover/ESACCI-global-10m.tif")
+lc_key <- read.csv("data/spatial/landcover/ESA_v2_labels.csv", header=T, sep=",")
 
-# Mask out the areas not in the focal region
-#plot(st_geometry(merged_shp))
+plot(lc_raster)
 
-lc_raster <- st_crop(lc_raster, merged_shp, crop=FALSE)
+# lc_key <- read.csv("data/spatial/landcover/ESACCI-LC_S2_Prototype_ColorLegend.csv", header=T, sep=";")
+# lc_key$rgb <- rgb(lc_key$R/256,lc_key$G/256,lc_key$B/256)
+# # Remove no data
+# lc_key <- lc_key[1:11,]
+# # Simplify labels
+# lc_key$LCCOwnLabel[lc_key$LCCOwnLabel=="Tree cover areas"] <- "Tree cover"
+# lc_key$LCCOwnLabel[lc_key$LCCOwnLabel=="Shrubs cover areas"] <- "Shrub cover"
+# lc_key$LCCOwnLabel[lc_key$LCCOwnLabel=="Vegetation aquatic or regularly flooded"] <- "Flooded vegetation"
+# 
+# # Mask out the areas not in the focal region
+# #plot(st_geometry(merged_shp))
+# 
+# #lc_raster <- st_crop(lc_raster, merged_shp, crop=FALSE)
 
-plot(lc_raster, breaks=seq(-0.5,10.5, by=1),col=lc_key$rgb[1:11], key.pos=NULL)
-legend("topright",legend=lc_key$LCCOwnLabel, fill=lc_key$rgb )
+#plot(lc_raster, breaks=seq(9.5,100.5, by=10),col=lc_key$rgb[1:11], key.pos=NULL)
+#legend("topright",legend=lc_key$LCCOwnLabel, fill=lc_key$rgb )
 ```
 
 ## Start and end nodes
@@ -956,145 +1031,183 @@ legend("topright",c("Mangrove","Land"), pch=15, col=c(met.brewer("Nizami")[2],rg
 
 ```
 
-#### Coastal Protected areas
+#### Low elevation protected areas
 
-The distribution of coastal protected areas which overlap (i.e. are within 1km) the coast is as follows:
+We will use start locations which represent lowland protected areas which have elevations <500m, above that and we start to transition into sub-montane forests types. Note - we unionize adjacent protected areas, then filter our isolated protected areas which are small in size < 3 km2, the double the critical habitat island size for collared peccaries, from:    
 
+Benchimol, Maíra, and Carlos A. Peres. "Predicting local extinctions of Amazonian vertebrates in forest islands created by a mega dam." Biological Conservation 187 (2015): 61-72.
 
 ```{r,  ch2_33, echo=F, eval=F, message=F}
-sf_use_s2(FALSE)
-# First donwload a line feature that encompasses the coast
-#plot(st_geometry(merged_shp))
+#sf_use_s2(FALSE)
 
-coast_shp <- ne_coastline(scale = 10, returnclass = c( "sf"))
-#plot(st_geometry(coast_shp), add=T, col="blue")
+
+# First subset the dem to < 500m
+dem_low <- clamp(dem_crop,upper=500, value=FALSE)
+tmp <- clamp(dem_low,lower=500)
+low_shp <- as.polygons(tmp)
+plot(low_shp, col="grey", border=F)
+plot(merged_shp, border=T, add=T, col=rgb(0,0,0,0))
+
+low_sf <- st_as_sf(low_shp)
 
 # Buffer the focal area they crop the coastline layer (to remove islands etc)
-tmp <- st_transform(merged_shp, 3160 )
-tmp <- st_buffer(tmp, 500)
-tmp <- st_transform(tmp, 4326)
-
-focal_coast <- st_intersection(coast_shp, tmp)
-#plot(st_geometry(focal_coast), add=T, col="red", lwd=2)
+# tmp <- st_transform(merged_shp, 3160 )
+# tmp <- st_buffer(tmp, 500)
+# tmp <- st_transform(tmp, 4326)
+# 
+# focal_coast <- st_intersection(coast_shp, tmp)
+# #plot(st_geometry(focal_coast), add=T, col="red", lwd=2)
 
 # Buffer pa'S by 1000m then intersect with protected areas
-tmp <- st_transform(focal_pa, 3160 )
-tmp <- st_buffer(tmp, 1000)
-tmp <- st_transform(tmp, 4326)
+#tmp <- st_transform(focal_pa, 3160 )
+#tmp <- st_buffer(tmp, 1000)
+#tmp <- st_transform(tmp, 4326)
 #plot(st_geometry(tmp), add=T)
 
 # Tried to intersect with the focal coastline but it didnt work 
-test <- focal_pa[st_intersects(tmp, focal_coast, sparse=F),]
-plot(st_geometry(merged_shp))
+#test <- focal_pa[st_intersects(tmp, focal_coast, sparse=F),]
+#plot(st_geometry(merged_shp))
 
 # This creates polygons of the protected area strips
-test <- st_intersection(tmp, focal_coast)
+low_pa <- st_intersection(focal_pa, low_sf)
+plot(st_geometry(low_pa), add=T, col="red")
+
+
 #plot(st_geometry(merged_shp))
 #plot(st_geometry(test), add=T, col="green")
 
 
-coastal_pa <- focal_pa[unlist(st_intersects(test,focal_pa, sparse=T)),]
-#plot(st_geometry(coastal_pa), add=T, col="green")
+# coastal_pa <- focal_pa[unlist(st_intersects(test,focal_pa, sparse=T)),]
+# #plot(st_geometry(coastal_pa), add=T, col="green")
+# 
+# # Remove duplicates
+# coastal_pa <- coastal_pa[duplicated(coastal_pa)==F,]
+# plot(st_geometry(coastal_pa), add=T, col="red")
 
-# Remove duplicates
-coastal_pa <- coastal_pa[duplicated(coastal_pa)==F,]
-plot(st_geometry(coastal_pa), add=T, col="red")
+
+# SOme of these are very small
+
+# leaflet() %>%
+#   addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+#   addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+#   addPolygons(data=low_pa, fillColor = "blue",
+#                label = low_pa$NAME, group="Protected areas") %>%
+#   addPolygons(data=low_sf, fillColor = "yellow",stroke=F) %>%
+# 
+#   addLayersControl(
+#     baseGroups = c("OSM (default)", "Satellite"),
+#     overlayGroups = c("Protected areas"))
+
+# Only include contiguous areas > 3km2
+
+low_contiguous <- st_union(low_pa, by_feature=T)
+low_contiguous <- st_make_valid(low_contiguous)
+low_contiguous$low_area_km2<- round(st_area(low_contiguous)/(1000*1000),1)
+hist(low_contiguous$low_area_km2, xlim=c(0,50), breaks=seq(0,max(as.numeric(low_contiguous$low_area_km2)+1), by=1))
+# Subset to large contiguous
+tmp <- low_contiguous[as.numeric(low_contiguous$low_area_km2)>3,]
+# Make it one shapefile
+tmp <- st_union(tmp)
+tmp <- st_make_valid(tmp)
+
+# Subset the low_pa to protected areas which intersect with these
+low_focal <- low_pa[st_intersects(low_pa, tmp, sparse=F)==T,]
 
 leaflet() %>%
   addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
   addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
-  addPolygons(data=coastal_pa[st_geometry_type(coastal_pa)!="GEOMETRYCOLLECTION",], fillColor = "blue",
-               label = coastal_pa$NAME[st_geometry_type(coastal_pa)!="GEOMETRYCOLLECTION"], group="Protected areas") %>%
+  addPolygons(data=low_sf, fillColor = "yellow",stroke=F) %>%
+  addPolygons(data=low_focal, fillColor = "blue",
+               label = low_focal$NAME, group="Protected areas") %>%
+
+
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Protected areas"))
+
+low_focal  <- st_cast(low_focal, "POLYGON")
+
+low_focal$area <- round(as.numeric(st_area(low_focal)/(1000*1000)),1)
+
+low_final <- low_focal[low_focal$area >3,]
+
+# Remove the border park again
+low_final <- low_final[low_final$NAME!="Corredor Fronterizo",]
+
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addPolygons(data=low_sf, fillColor = "yellow",stroke=F) %>%
+  addPolygons(data=low_final, fillColor = "blue",
+               label = low_final$NAME, group="Protected areas") %>%
+
+
   addLayersControl(
     baseGroups = c("OSM (default)", "Satellite"),
     overlayGroups = c("Protected areas"))
 
 
+st_write(low_focal, "data/spatial/protected_areas/lowland_protected_areas.shp", overwrite=T, append=F)
 
+st_write(low_contiguous, "data/spatial/area_of_interest/low_elevation_pas_contiguous.shp", append=F)
 
-# Remove parks without areas
-coastal_pa <- coastal_pa[coastal_pa$GIS_AREA>0.01,]
-coastal_pa <- coastal_pa[coastal_pa$REP_AREA>0.01,]
-
-# Remove parks < 1km2
-coastal_pa <- coastal_pa[coastal_pa$GIS_AREA>1,]
-
-# Remove Proposed status
-coastal_pa <- coastal_pa[coastal_pa$STATUS!="Proposed",]
-# Remove UNESCO-MAB Biosphere Reserve
-coastal_pa <- coastal_pa[coastal_pa$DESIG!="UNESCO-MAB Biosphere Reserve",]
-
-plot(st_geometry(coastal_pa[st_geometry_type(coastal_pa)=="GEOMETRYCOLLECTION",]), add=T, col="blue")
-
-coastal_pa <- coastal_pa[st_geometry_type(coastal_pa)!="GEOMETRYCOLLECTION",]
-
-#Remove the border park
-coastal_pa <- coastal_pa[coastal_pa$NAME!="Corredor Fronterizo",]
-
-st_write(coastal_pa, "data/spatial/protected_areas/Coastal_protected_areas.shp", overwrite=T, append=F)
 
 ```
 
 
 ```{r, echo=F}
-coastal_pa <- st_read("data/spatial/protected_areas/Coastal_protected_areas.shp")
+lowland_pa <- st_read("data/spatial/protected_areas/lowland_protected_areas.shp")
 
 plot(st_geometry(merged_shp))
-plot(st_geometry(coastal_pa),add=T, col="red")
+plot(st_geometry(lowland_pa),add=T, col="red")
 ```
 
-So we have around `r nrow(coastal_pa)` protected areas which are link ocean and land. Note this also includes near-shore marine PA's. For each of these locations, it doesnt make sense to include the full protected area within these calculations as they sometimes run a long way inland (biasing connectivity estimates). The center points of the protected areas would not reflect reef or ocean connectivity. We therefore crop each of these protected areas to the zones within 1 km of the coast, and will use these as connectivity start points.
+So we have around `r nrow(lowland_pa)` protected areas which are link ocean and land. 
 
-Map of the protected areas with 1km of the coast:
+It would be useful to know if these habitats encompass coastal locations too, so we will add a ture/false column. 
 
 ```{r  ch2_34, eval=F, include=F, message=F, warning=F}
 sf_use_s2(FALSE)
 # First buffer to terrestrial <500m from the ocean
 # Buffer pa'S by 1000m then intersect with protected areas
-tmp <- st_transform(focal_coast, 3160)
-tmp <- st_buffer(tmp, 1000)
+
+coast_shp <- ne_coastline(scale = 10, returnclass = c( "sf"))
+# Buffer the focal area they crop the coastline layer (to remove islands etc)
+tmp <- st_transform(base_shp, 3160 )
+tmp <- st_buffer(tmp, 500)
 tmp <- st_transform(tmp, 4326)
 
-# Intersect the coasta PAS' with buffer
-test <- st_intersection(coastal_pa, tmp )
+focal_coast <- st_intersection(coast_shp, tmp)
+#plot(st_geometry(focal_coast), col="red", lwd=2)
+tmp <- st_transform(focal_coast, 3160)
+tmp <- st_buffer(tmp, 5000)
+tmp <- st_transform(tmp, 4326)
+tmp <- st_union(tmp)
 
-# NOTE THIS GIVES YOU EVERYTHING, we need to mask out the water areas
-test2 <- st_intersection(test, focal_shp )
-
+# Intersect the lowland protected areas with buffer
+lowland_pa$coastal_habitat <- as.numeric(st_intersects(lowland_pa, tmp, sparse=F ))
 
 # Add it to a leaflet to check
 leaflet() %>% 
   addTiles() %>% 
-  addPolygons(data=test, weight = 2, fillColor = "red") %>% 
-  addPolygons(data=test2, weight = 2, fillColor = "blue")
-
-# If we have multiple fragments for each prtected area - take the largest
-test2$COAST_AREA <- st_area(test2)
-
-test2 <- test2[order(test2$NAME, test2$COAST_AREA),]
-test3 <- test2[duplicated(test2$NAME)==F,]
+  addPolygons(data=lowland_pa[lowland_pa$coastal_habitat==0,], weight = 2, fillColor = "red") %>% 
+  addPolygons(data=lowland_pa[lowland_pa$coastal_habitat==1,], weight = 2, fillColor = "blue") 
+  
+st_write(lowland_pa, "data/spatial/protected_areas/lowland_protected_areas.shp", overwrite=T, append=F)
 
 
-# leaflet() %>% 
-#   addTiles() %>% 
-#   addPolygons(data=test, weight = 2, fillColor = "red") %>% 
-#   #addPolygons(data=test2, weight = 2, fillColor = "blue") %>% 
-#   addPolygons(data=test3, weight = 5, fillColor = "black")
 
-terrestrial_pa <- test3
-
-# Write the shape
-st_write(terrestrial_pa, "data/spatial/protected_areas/Terrestrial_focal_areas.shp", overwrite=T, append=F)
 ```
 
 
 ```{r  ch2_35, warning=F, message=F, include=F }
-terrestrial_pa <- st_read("data/spatial/protected_areas/Terrestrial_focal_areas.shp")
+lowland_pa <- st_read("data/spatial/protected_areas/lowland_protected_areas.shp")
 ```
 
 ```{r  ch2_36}
 plot(st_geometry(merged_shp), col="grey", border=F)
-plot(st_geometry(terrestrial_pa), col="red", add=T)
+plot(st_geometry(lowland_pa), col="red", add=T)
 
 ```
 
@@ -1111,9 +1224,10 @@ Below we provide graphical representation of different height thresholds across 
 
 ```{r  ch2_37}
 par(mfrow=c(1,1))
-plot(st_geometry(merged_shp), col=rgb(0.95,0.95,0.95))
-plot(dem_raster, las=1 ,breaks=c(500,1000,1500,2000, 2500, 3000), col=terrain.colors(5), bg="grey", add=T, main="")
-legend("topright",c("0-500", "500-1000", "1000-1500", "1500-2000", "2000-2500", "3000+"), fill=c(rgb(0.95,0.95,0.95), terrain.colors(5)))
+plot(st_geometry(base_shp), col=rgb(0.95,0.95,0.95))
+plot(st_geometry(merged_shp), col=rgb(0.8,0.8,0.8), add=T)
+plot(dem_crop, las=1 ,breaks=c(500,1000,1500,2000, 2500, 3000, 6000), col=terrain.colors(6), bg="grey", add=T, main="")
+legend("topright",c("500-1000", "1000-1500", "1500-2000", "2000-2500", "2500-3000", "3000+"), fill=c(rgb(0.95,0.95,0.95), terrain.colors(6)))
 
 ```
 
@@ -1130,31 +1244,60 @@ From: Neate-Clegg MHC, Jones SEI, Burdekin O, et al (2018) Elevational changes i
 ```{r ch2_38}
 sf_use_s2(FALSE)
 
-high_raster <- dem_raster
-# Make a binary raster
-high_raster$SRTM90_V4.elevation.tif[high_raster$SRTM90_V4.elevation.tif<1500] <- NA
-high_raster$SRTM90_V4.elevation.tif[high_raster$SRTM90_V4.elevation.tif>=1500] <- 1
-#plot(high_raster)
-# Convert to polygon
+high_raster <- dem_crop
 
-high_poly = st_as_sf(high_raster, as_points = FALSE, merge = TRUE)
+# Make a binary raster
+tmp <- clamp(high_raster,lower=1500, value=FALSE)
+#plot(tmp)
+tmp <- clamp(tmp,upper=1500)
+plot(tmp)
+high_shp <- as.polygons(tmp)
+plot(low_shp, col="grey", border=F)
+plot(high_shp, col="red", border=F, add=T)
+
+plot(merged_shp, border=T, add=T, col=rgb(0,0,0,0))
+legend("topright", c("low", "high"), fill=c("grey", "red"))
+
+high_poly <- st_as_sf(high_shp, merge = TRUE)
 
 #plot(st_geometry(high_poly), col="red")
 names(high_poly) <- c("1500m_thresh", "geometry" )
 
 # Clean up any issues
 high_poly <- st_buffer(high_poly, 0)
-focal_pa <- st_buffer(focal_pa, 0)
+
+focal_pa <- st_buffer(all_pa, 0)
 
 # To deal with the error
 high_pa <- st_intersection(focal_pa, high_poly)
 
-# plot(st_geometry(merged_shp))
+# Check contiguous area size
+
+high_contiguous <- st_union(high_pa, by_feature=T)
+high_contiguous <- st_make_valid(high_contiguous)
+high_contiguous$low_area_km2<- round(st_area(high_contiguous)/(1000*1000),1)
+hist(high_contiguous$low_area_km2, #xlim=c(0,50), 
+     breaks=seq(0,max(as.numeric(high_contiguous$low_area_km2)+1), by=1))
+# Subset to large contiguous
+tmp <- high_contiguous[as.numeric(high_contiguous$low_area_km2)>3,]
+# Make it one shapefile
+tmp <- st_union(tmp)
+tmp <- st_make_valid(tmp)
+
+# Subset the low_pa to protected areas which intersect with these
+high_focal <- high_pa[st_intersects(high_pa, tmp, sparse=F)==T,]
+
+
+
+
+
+# plot(st_geometry(base_shp))
+# #plot(st_geometry(focal_shp), add=T, col="lightgrey")
 # plot(st_geometry(high_poly), col="grey", border=F, add=T)
 # plot(st_geometry(high_pa), add=T, col="green")
 
 # Interactive plot to check
-tmp <- st_union(high_pa)
+tmp <- st_union(high_focal)
 
 leaflet() %>%
   addProviderTiles(providers$OpenTopoMap, group="Topo") %>%
@@ -1166,15 +1309,16 @@ leaflet() %>%
     options = layersControlOptions(collapsed = FALSE)
   )
 
-st_write(high_pa, "data/spatial/area_of_interest/high_elevation_pas.shp", append=F)
+st_write(high_focal, "data/spatial/area_of_interest/high_elevation_pas.shp", append=F)
+st_write(high_contiguous, "data/spatial/area_of_interest/high_elevation_pas_contiguous.shp", append=F)
 
 ```
 
 We will use high elevation (>1500) protected areas as the "end" points for our connectivity analyses.
 
 ```{r ch2_39}
-plot(st_geometry(high_pa))
-plot(gfc_2020, las=1,nbreaks=11 ,breaks="equal", col=rev(terrain.colors(10)), bg="grey", main="", add=T)
+#plot(st_geometry(high_pa))
+plot(gfc_2020)
 plot(st_geometry(high_pa), add=T)
 
 # This aggregate method is very slow. I need a different solution. 

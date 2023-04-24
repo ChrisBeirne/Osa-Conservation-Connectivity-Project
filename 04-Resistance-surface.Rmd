@@ -18,13 +18,18 @@ library(igraph)
 library(nngeo)
 library(dplyr)
 library(leaflet)
+library(terra)
+library(elevatr)
+
 
 
 # Import required data files
 
 merged_shp <- st_read("data/spatial/area_of_interest/aoi.shp")
+base_shp <- st_read("data/spatial/area_of_interest/base_aoi.shp", quiet = TRUE)
 high_pa <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp")
 mangrove_large <- st_read("data/spatial/mangroves/mangrove_large_1kmsq.shp")
+#plot(st_geometry(high_pa))
 ```
 
 # Resistance surface {#cost-surface}
@@ -68,7 +73,7 @@ plot(ghm_COND)
 Now we bring in the forest cover layer to penalize non-forest areas. The Y-axis label denotes % forest cover. 
 
 ```{r ch4_3, echo=F, message=F}
-gfc_2020 <- read_stars("data/spatial/gfc/global_forest_change_2020_v1_8.treecover2000.tif")
+gfc_2020 <- read_stars("data/spatial/gfc/global_forest_change_2021_v1_9.treecover2000.tif")
 
 # Get it to the same resolution as GHM
 gfc_LOWRES <- st_warp(gfc_2020, ghm_raster)
@@ -94,7 +99,7 @@ gfc_LOWRES[is.na(gfc_LOWRES)] <- a[is.na(gfc_LOWRES)]
 #plot(gfc_LOWRES)
 
 # I am having issues with some mangroves being outside of raster. Add a 5km buffer.
-aoi_17N <- st_transform(merged_shp,31971)
+aoi_17N <- st_transform(base_shp,31971)
 aoi_17N<- st_buffer(aoi_17N, 5000)
 #plot(st_geometry(aoi_17N))
 
@@ -292,7 +297,10 @@ We can then integrate this high resolution land use map with other layers of int
 
 The following is a down-scaled map of the whole survey area. 
 
-```{r ch4_8, echo=F, message=F, warning=F}
+```{r ch4_8, echo=F, message=F, warning=F, eval=F}
+
+#OLD METHOD REMOVED
+
 lc_raster <- read_stars("data/spatial/landcover/ESACCI-LC-L4-LC10-Map-10m-CAM.tif")
 lc_key <- read.csv("data/spatial/landcover/ESACCI-LC_S2_Prototype_ColorLegend.csv", header=T, sep=";")
 lc_key$rgb <- rgb(lc_key$R/256,lc_key$G/256,lc_key$B/256)
@@ -312,25 +320,54 @@ plot(lc_raster, breaks=seq(-0.5,10.5, by=1),col=lc_key$rgb[1:11], key.pos=NULL)
 legend("topright",legend=lc_key$LCCOwnLabel, fill=lc_key$rgb )
 ```
 
+
+```{r ch4_8new, echo=F, message=F, warning=F, eval=F}
+# New method
+lc <- rast("data/spatial/landcover/ESACCI-global-10m_merged.tif")
+
+# Reduce res
+#?terra::aggregate
+lc_100m <- aggregate(lc, fact=10, fun="modal")
+
+lc_key <- read.csv("data/spatial/landcover/ESA_v2_labels.csv", header=T, sep=",")
+lc_key$rgb <- paste0("#",lc_key$rgb ) 
+coltab(lc_100m)  <- data.frame(value=lc_key$NB_LAB, col=lc_key$rgb)
+plot(lc)
+#plot(lc_100m)
+writeRaster(lc_100m, "data/spatial/landcover/ESACCI-global-100m_merged.tif", overwrite=T)
+
+```
+
+```{r}
+lc_100m <- rast("data/spatial/landcover/ESACCI-global-100m_merged.tif")
+
+lc_key <- read.csv("data/spatial/landcover/ESA_v2_labels.csv", header=T, sep=",")
+lc_key$rgb <- paste0("#",lc_key$rgb ) 
+
+# Remove no data
+#lc_key <- lc_key[1:11,]
+# Simplify labels
+plot(lc_100m, legend=T, key.pos=NULL)
+legend("topright",legend=lc_key$LCCOwnLabel, fill=lc_key$rgb)
+```
+
+
+
 Lets zoom in and explore a location we know well.
 
 #### Interactive map
 
 ```{r ch4_9, echo=F, message=F, warning=F}
-library(terra)
-lc <- rast("data/spatial/landcover/ESACCI-LC-L4-LC10-Map-10m-CAM.tif")
 #Subset to just osa xmin, x max, ymin, ymax
 aoi <-  ext(-84, -82.5,8.38,9.38)
-lc_sub  <- crop(lc, aoi)
-
-# Downscale it!
-lc_sub_small <- aggregate(lc_sub, fact=10, fun="modal")
+lc_sub  <- terra::crop(lc_100m, aoi)
+#plot(lc_sub)
 
 # Convert to a raster
-lc_sub <- as(lc_sub_small,"Raster")
+lc_sub <- as(lc_sub,"Raster")
 colours <- lc_key$rgb
 # Plot it in leaflet
-at <- seq(-0.5, 10.5, 1)
+at <- c(5,15,25,35,45,55,65,75,85,94,96,101)
 cb <- colorBin(palette = colours, bins = at, domain = at)
 
 leaflet() %>%
@@ -341,6 +378,25 @@ leaflet() %>%
   addLayersControl(
     baseGroups = c("OSM (default)", "Satellite"),
     overlayGroups = c("Raster")) 
+
+
+
+
+
+`# Dowload elevation data too
+elevation <- get_elev_raster(lc_sub, z = 11)
+elevation[elevation<0]<- -100
+#plot(elevation)
+raster_utm <- projectRaster(elevation, crs=31971)
+
+#plot(raster_utm)
+writeRaster(elevation, "Data/Chapter6/Case_study_1_Osa/elevation.tif", overwrite=TRUE)
+writeRaster(raster_utm, "Data/Chapter6/Case_study_1_Osa/elevation_utm.tif", overwrite=TRUE)
+
+
+#writeRaster(cost_final_ras, "Data/Chapter6/Case_study_1_Osa/cost_surface_100m.tif", overwrite=TRUE)
+
+
 
 ```
 
@@ -448,9 +504,15 @@ gfc <- rast("data/spatial/gfc/global_forest_change_2021_v1_9.treecover2000_Osa.t
 #gfc_new <- rast("data/spatial/gfc/global_forest_change_2021_v1_9_2022_OSA.tif")
 
 gfc_sub  <- crop(gfc, aoi)
-gfc_100 <- resample(gfc_sub, lc_sub_small)
+biomass_sub_ras  <- as(biomass_sub,"Raster")
+
+lc_sub_ter  <- terra::crop(lc_100m, aoi)
+
+gfc_100 <- terra::resample(gfc_sub, lc_sub_ter)
+
 #plot(gfc_100)
 # Subsample to same resolution as the 
+
 gfc_sub_ras  <- as(gfc_100,"Raster")
 
 leaflet() %>%
@@ -490,17 +552,19 @@ Now that we have a high resolution habitat map (accounting for forest quality), 
 
 Using traditional approaches this took a huge amount of computational time. However, we found a work around using the 'terra' package in R. This package uses clever computing to reduce the memory load of large rasters making high resolution mapping in R more scale-able. For our re-classification scheme we will use the following formula, based on work from other publications. The values should be viewed as the probability of use e.g. 1000 = very high probability of movement, 1 = very low:
 
-- No data:              0  -> NA
-- Tree cover:           1  -> 1000 [The best, will moderate with the tree height layer to account for quality] 
-- Shrub cover:          2  -> 150 [some cover - mianly seems to be forest margins]
-- Grassland:            3  -> 50  [Pasture]  
-- Cropland:             4  -> 60 [May have canopy cover, risky]
-- Flooded vegetation:   5  -> 20 [hard to move through]
-- Sparse vegetation:    6  -> 40 [Risky but useable]
-- Bare areas:           7  -> 10 [Risky but useable]
-- Built up areas:       8  -> NA [Urban areas are excluded as they have no functional connectivity]
-- Snow and/or Ice:      9  -> NA
-- Open Water:           10 -> 2 [Very low conductivity -> last resort (100m resolution will represent large water bodies)]
+- No data:                  0   -> NA
+- Tree cover:               10  -> 1000 [The best, will moderate with the tree height layer to account for quality] 
+- Shrub cover:              20  -> 150 [some cover - mianly seems to be forest margins]
+- Grassland:                30  -> 30  [Pasture]  
+- Cropland:                 40  -> 30 [May have canopy cover, risky]
+- Built up areas:           50  -> NA [Urban areas are excluded as they have no functional connectivity]
+- Bare / sparse vegetation: 60  -> 40 [Risky but useable]
+- Snow and/or Ice:          70  -> NA
+- Open Water:               80  -> 30 [Very low conductivity -> last resort (100m resolution will represent large water 
+- Herbaceous wetland:       90  -> 20 [hard to move through]
+- Mangroves                 95  -> 500 [Probably not used]
+- Moss and lichen:          100 -> 2 Dont exist on thsi landscpe
+
 
 ### High resolution case study: Osa
 
@@ -510,16 +574,17 @@ Below is the high resolution 'resistance to movement' map for the Osa Pennisula.
 
 ```{r  ch4_11a, echo=F, message=F, warning=F}
 m2     <- c(0, NA,
-            1, 1000,
-            2, 150,
-            3, 50,
-            4, 60,
-            5, 20,
-            6, 40,
-            7, 10,
-            8, NA,
-            9, NA,
-            10,2
+            10, 1000,
+            20, 150,
+            30, 30,
+            40, 30,
+            50, NA,
+            60, 40,
+            70, NA,
+            80, 30,
+            90, 20,
+            95, 500,
+            100,2
             )
 m2 <- matrix(m2, ncol=2, byrow = TRUE)
 
@@ -534,7 +599,7 @@ m2 <- matrix(m2, ncol=2, byrow = TRUE)
   # Merge for final raster
 
 library(terra)
-lc <- rast("data/spatial/landcover/ESACCI-LC-L4-LC10-Map-10m-CAM.tif")
+lc <- rast("data/spatial/landcover/ESACCI-global-100m_merged.tif")
 
 #Subset to just osa xmin, x max, ymin, ymax
 aoi <-  ext(-84, -82.5,8.38,9.38)
@@ -545,23 +610,23 @@ lc_re <- classify(lc_sub, m2, right=TRUE)
 
 # Downscale to 100m resolution
 #lc_re_small <- aggregate(lc_re, fact=10, fun="modal")
-lc_re_small <- aggregate(lc_re, fact=10, fun="mean")
+#lc_re_small <- aggregate(lc_re, fact=10, fun="mean")
 
-lc_re_small_ras <- as(lc_re_small,"Raster")
-
+lc_re_small_ras <- as(lc_re,"Raster")
+plot(lc_re_small_ras)
 ```
 
 
 ```{r  ch4_13, echo=F, message=F, warning=F, include=F}
 #setup palette
-leaflet() %>%
-  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
-  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
-  addRasterImage(biomass_sub_ras, group="Biomass") %>%
-  addRasterImage(lc_re_small_ras, group="Resistance") %>%
-  addLayersControl(
-    baseGroups = c("OSM (default)", "Satellite"),
-    overlayGroups = c( "Biomass","Resistance")) 
+#leaflet() %>%
+#  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+#  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+#  addRasterImage(biomass_sub_ras, group="Biomass") %>%
+#  addRasterImage(lc_re_small_ras, group="Resistance") %>%
+#  addLayersControl(
+#    baseGroups = c("OSM (default)", "Satellite"),
+#    overlayGroups = c( "Biomass","Resistance")) 
 ```
 
 
@@ -588,17 +653,60 @@ plot(biomass_modifier)
 
 #We then mask out non-forest areas, and apply the modifier, which creates a surface which looks like:
 
-just_forest <- ifel(lc_sub_small == 1, 1, NA)
+just_forest <- ifel(lc_sub == 10, 1, NA)
+
+
+# test <- as(just_forest,"Raster")
+# test2 <- as(lc_sub,"Raster")
+# leaflet() %>%
+#     addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+#     addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+#     addRasterImage(test2, colors = cb, group="lc") %>%
+#     addRasterImage(test, group="just_forest") %>%
+#    
+#     
+#     addLegend(colors = lc_key$rgb, labels=lc_key$LCCOwnLabel)%>% 
+#   addLayersControl(
+#     baseGroups = c("OSM (default)", "Satellite"),
+#     overlayGroups = c("lc",  "just_forest")) 
+
+
 #plot(just_forest)
 # Match the resolutions
 biomass_modifier <-  resample(biomass_modifier, just_forest)
+#plot(biomass_modifier)
+#plot(just_forest,add=T)
+
 # Keep non-forest areas the same too!                      
-biomass_modifier <- mask(biomass_modifier,just_forest, updatevalue=1)
+final_modifier <- mask(biomass_modifier,just_forest)
+# Keep none forest as they are
+final_modifier <- subst(final_modifier, NA, 1)
+
 ```
 
 ```{r  ch4_16, echo=F, message=F, warning=F}
-cost_final <- lc_re_small*biomass_modifier
-#plot(lc_osa_final)
+cost_final <- lc_re*final_modifier
+plot(cost_final)
+
+lc_100m <- rast("data/spatial/landcover/ESACCI-global-100m_merged.tif")
+base_terra <- vect(base_shp)
+
+
+# First mask the outline then do large waterbodies 
+cost_final  <-mask(cost_final,base_terra)
+
+
+# Mask out large water bodies
+cond_1km<- raster("Data/Chapter5/Low_res_resistance_surface.tif")
+#plot(cond_1km)
+cond_1km[cond_1km>0]<-1
+#plot(cond_1km)
+tmp <- rast(cond_1km)
+tmp <- as.polygons(tmp)
+tmp <- project(tmp,cost_final )
+#plot(tmp)
+cost_final  <-mask(cost_final, tmp)
+
 
 cost_final_ras <- as(cost_final,"Raster")
 
@@ -611,28 +719,6 @@ leaflet() %>%
     baseGroups = c("OSM (default)", "Satellite"),
     overlayGroups = c("Original", "Modified")) 
 
-```
-
-This layer looks like a reasonable resistance surface, however mangroves are paying a big price for their small stature, and appear highly resistant to animal movement (as they are low biomass). We instead will give them a higher higher conductance score (800), which makes them more favorable to animal movement. The update map below shows the high resolution map for the Osa Peninsula, 
-
-```{r  ch4_17, echo=F, message=F, warning=F}
-# import mangroves
-mangrove <- vect("data/spatial/WCMC010_MangrovesUSGS2011_v1_4/clipped/mangroves_clipped.shp")
-#rasterise
-mangrove <- rasterize(mangrove, cost_final, 800)
-
-cost_final_mangrove <- cover(mangrove,cost_final)
-
-cost_final_ras <- as(cost_final_mangrove,"Raster")
-
-leaflet() %>%
-  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
-  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
-  addRasterImage(lc_re_small_ras, group="Original") %>%
-  addRasterImage(cost_final_ras, group="Modified") %>%
-  addLayersControl(
-    baseGroups = c("OSM (default)", "Satellite"),
-    overlayGroups = c("Original", "Modified")) 
 
 dir.create("Data/Chapter6/Case_study_1_Osa/")
 
@@ -642,201 +728,183 @@ writeRaster(cost_final_ras, "Data/Chapter6/Case_study_1_Osa/cost_surface_100m.ti
 
 ```
 
-These resistances surfaces are used in subsequent chapters to perform the connectivity analyses.
+These resistance surfaces are used in subsequent chapters to perform the connectivity analyses.
 
+## High resolution layer for least cost models
 
-```{r, eval=F, include =F}
+Using the same parameters as above
 
-##### OLD CODE TESTING 
-#lc_raster <- raster("data/spatial/landcover/ESACCI-LC-L4-LC10-Map-10m-CAM.tif")
-#lc_stars <- read_stars("data/spatial/landcover/ESACCI-LC-L4-LC10-Map-10m-CAM.tif")
-
-# The high resolution map is 170,000 x 170,000 cells...
-# The HMI raster is           1,300  x 1700... x100 smaller.
-
-
-# So for now lets crop to just the Osa pennisula
-
-# Buffier piedras blanca
-
-template <- focal_pa[focal_pa$NAME=="Piedras Blancas",]
-template <- st_buffer(template, 50000)
-
-# # starting parks
-# leaflet() %>%
-#   addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
-#   addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
-#     addPolygons(data=template, fillColor = "red",
-#                label = template$NAME, group="aoi") %>%
-#   addLayersControl(
-#     baseGroups = c("OSM (default)", "Satellite"),
-#     overlayGroups = c("aoi")) 
-
-#aoi_hr <- st_as_sfc(st_bbox(template))
-# Based on the above I specify my own AOI
-aoi_custom <- st_bbox(template)
-aoi_custom[1] <- -84
-aoi_custom[2] <- 8.38
-aoi_custom[3] <- -82.5
-aoi_custom[4] <- 9.38
-template <- st_as_sfc(aoi_custom)
-# Visualise the AOI
-
-
-# starting parks
-leaflet() %>%
-  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
-  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
-    addPolygons(data=template, fillColor = "red",
-               group="aoi") %>%
-  addLayersControl(
-    baseGroups = c("OSM (default)", "Satellite"),
-    overlayGroups = c("aoi"))
-
-
-
-# crop the raster layer to this aoi and see how big it is
-lc_osa_ras <- crop(lc_raster, st_bbox(aoi_custom))
-
-# Plot raster with a key
-plot(lc_osa_ras, breaks=seq(-0.5,10.5, by=1),col=lc_key$rgb[1:11], key.pos=NULL)
-# Looks good
-# Mask off the islands
-lc_osa_ras <- mask(lc_osa_ras, merged_shp)
-writeRaster(lc_osa_ras, "data/Chapter4/os_raster_lc_10m.tif", overwrite=T)
-
-
-lc_osa_ras<- raster("data/Chapter4/os_raster_lc_10m.tif")
-
-plot(lc_osa_ras, breaks=seq(-0.5,10.5, by=1),col=lc_key$rgb[1:11], key.pos=NULL)
-# Reclassify this into a conductance layer 
-
-# Starting hist
-hist(lc_osa_ras, breaks=seq(-0.5, 10.5,by=1))
-
-
-
+```{r}
 library(terra)
-lc <- rast("data/Chapter4/os_raster_lc_10m.tif")
+lc_100m <- rast("data/spatial/landcover/ESACCI-global-100m_merged.tif")
+base_terra <- vect(base_shp)
+lc_key <- read.csv("data/spatial/landcover/ESA_v2_labels.csv", header=T, sep=",")
+lc_key$rgb <- paste0("#",lc_key$rgb ) 
+lc_100m <- mask(lc_100m, base_terra)
+# Remove no data
+#lc_key <- lc_key[1:11,]
+# Simplify labels
+plot(lc_100m, legend=T, key.pos=NULL)
+legend("topright",legend=lc_key$LCCOwnLabel, fill=lc_key$rgb)
+```
 
 
-
-
-lc_re <- classify(lc, m2, right=TRUE)
-
-plot(lc_re)
-
-
-library(terra)
-lc <- rast("data/Chapter4/os_raster_lc_10m.tif")
-
-# lets try a high res circuit scape  
-start <- focal_pa[focal_pa$NAME=="Corcovado",]
-end <- high_pa
-
-# Convert to a spatvect
-start <- as(start, "Spatial")
-start_v <- vect(start)
-end <- as(end, "Spatial")
-end_v <- vect(end)
-
-
-# Rasterise polygon with TERRA?
-start_ras <- rasterize(start_v,lc_re, field=1)
-end_ras <- rasterize(end_v,lc_re, field=999)
-
-plot(start_ras)
-plot(end_ras,add=T)
-# Merge them for the polygons file
-polygons <- merge(start_ras,end_ras)
-plot(polygons)
-
-
-# TAke the centroids and rasterise them
-sources <- rasterize(centroids(start_v),lc_re, 
-             field=round(expanse(start_v, unit="km", transform=TRUE)) # make the area the current
-             )
-
-grounds <- rasterize(centroids(end_v),lc_re, 
-             field=1 # make the area the current
-             )
-
-
-library(terra)
-lc <- rast("data/Chapter4/os_raster_lc_10m.tif")
-
-# lets try a high res circuit scape  
-start <- focal_pa[focal_pa$NAME=="Corcovado",]
-end <- high_pa
-
-# Convert to a spatvect
-start <- as(start, "Spatial")
-start_v <- vect(start)
-end <- as(end, "Spatial")
-end_v <- vect(end)
-
-
-# DOWNSAMPLE TO MAKE THEM MANAGEABLE
-
-# Okay this is a no go right now
-lc_re_small <- aggregate(lc_re, fact=10, fun="modal")
-
-start_ras <- rasterize(start_v,lc_re_small, field=1)
-end_ras <- rasterize(end_v,lc_re_small, field=999)
-polygons <- merge(start_ras,end_ras)
-plot(polygons)
-sources <- rasterize(centroids(start_v),lc_re_small, 
-             field=round(expanse(start_v, unit="km", transform=TRUE))) # make the 
-
-grounds <- rasterize(centroids(end_v),lc_re_small, 
-             field=1) # make the area the current
-             
-lc_re_ras    <- as(lc_re_small,"Raster")
-polygons_ras <- as(polygons,"Raster")
-sources_ras    <- as(sources,"Raster")
-grounds_ras    <- as(grounds,"Raster")
-
-
-# Write the objects
-dir.create("Data/Chapter6/Osa_test_low_res")
-
-# Cell map
-writeRaster(lc_re_ras, "Data/Chapter6/Osa_test_low_res/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
-
-# Source
-writeRaster(sources_ras, "Data/Chapter6/Osa_test_low_res/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
-
-# Ground
-writeRaster(grounds_ras, "Data/Chapter6/Osa_test_low_res/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
-
-# Polygon
-writeRaster(polygons_ras, "Data/Chapter6/Osa_test_low_res/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
-
-dir.create("Data/Chapter6/Osa_test_low_res/output")
-
-
-res <- raster("Data/Chapter6/Osa_test_low_res/output/osa_hires_curmap.asc")
-plot(res, zlim=c(0,10))
-
-
-polygons <- end_ras
-plot(polygons)
-
-polygons_ras <- as(polygons,"Raster")
-
-# Polygon
-writeRaster(polygons_ras, "Data/Chapter6/Osa_test_low_res/regions_grid_point_source.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
-
-dir.create("Data/Chapter6/Osa_test_low_res/output")
-
-
-res <- raster("Data/Chapter6/Osa_test_low_res/output/osa_hires_point_source_curmap.asc")
-plot(res, zlim=c(0,10))
-
-res <- raster("Data/Chapter6/Osa_test_low_res/output/osa_hires_point_source_cg_amg_curmap.asc")
-plot(res, zlim=c(0,10))
+```{r  ch4_11a, echo=F, message=F, warning=F}
+# Reclassify the full thing?
+lc_re <- classify(lc_100m, m2, right=TRUE)
+lc_re_ras <- as(lc_re,"Raster")
+plot(lc_re_ras)
 
 ```
 
 
+```{r  ch4_13, echo=F, message=F, warning=F, include=F}
+#setup palette
+#leaflet() %>%
+#  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+#  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+#  addRasterImage(biomass_sub_ras, group="Biomass") %>%
+#  addRasterImage(lc_re_ras, group="Resistance") %>%
+#  addLayersControl(
+#    baseGroups = c("OSM (default)", "Satellite"),
+#    overlayGroups = c( "Biomass","Resistance")) 
+```
 
+
+```{r  ch4_14, echo=F, message=F, warning=F, include=F}
+#### Add the modifier for biomass
+# First we should examine the range of values of biomass (Mg C/ha):
+# 
+# - mean = `r mean(values(biomass_sub_ras), na.rm=T)`
+# - min = `r min(values(biomass_sub_ras), na.rm=T)`
+# - max = `r max(values(biomass_sub_ras), na.rm=T)`
+# 
+# The way I will do this is scale the biomass layer from 0 -> 1. Anything over 100 gets 1, as it is represents good quality forest. 
+# 
+# The resulting layer looks like this:
+
+
+biomass <- clamp(biomass, upper=100)
+#plot(biomass)
+biomass_modifier <- biomass/100
+plot(biomass_modifier)
+```
+
+```{r  ch4_15, echo=F, message=F, warning=F, include=F}
+
+#We then mask out non-forest areas, and apply the modifier, which creates a surface which looks like:
+
+just_forest <- ifel(lc_100m == 10, 1, NA)
+
+#plot(just_forest)
+# Match the resolutions
+biomass_modifier <-  resample(biomass_modifier, just_forest)
+#plot(biomass_modifier)
+#plot(just_forest,add=T)
+
+# Keep non-forest areas the same too!                      
+final_modifier <- mask(biomass_modifier,just_forest)
+# Keep none forest as they are -> 1 (as we ultimately take the prodict)
+final_modifier <- subst(final_modifier, NA, 1)
+
+#?terra::mask
+```
+
+```{r  ch4_16, echo=F, message=F, warning=F}
+cost_final <- lc_re*final_modifier
+
+
+# Mask out large water bodies
+cond_1km<- raster("Data/Chapter5/Low_res_resistance_surface.tif")
+#plot(cond_1km)
+cond_1km[cond_1km>0]<-1
+#plot(cond_1km)
+tmp <- rast(cond_1km)
+tmp <- as.polygons(tmp)
+tmp <- project(tmp,cost_final )
+#plot(tmp)
+cost_final  <-mask(cost_final, tmp)
+plot(cost_final)
+#cost_final_ras <- as(cost_final,"Raster")
+
+# leaflet() %>%
+#   addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+#   addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+#   addRasterImage(lc_re_small_ras, group="Original") %>%
+#   addRasterImage(cost_final_ras, group="Modified") %>%
+#   addLayersControl(
+#     baseGroups = c("OSM (default)", "Satellite"),
+#     overlayGroups = c("Original", "Modified")) 
+
+
+
+#########################################
+# 100m Resoltuion #######################
+#########################################
+
+writeRaster(cost_final, "Data/Chapter5/High_res_resistance_surface_final.tif", overwrite=T)
+
+# Make a 17N version
+cost_final<- rast("Data/Chapter5/High_res_resistance_surface_final.tif")
+tmp <- project(cost_final, "+proj=utm +zone=17 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs +type=crs")
+
+# Also make a version with NA's removed (required for least cost path models)
+tmp2 <- classify(tmp, cbind(NA, 0.000001))
+tmp <- as(tmp,"Raster")
+tmp2 <- as(tmp2,"Raster")
+
+writeRaster(tmp, "Data/Chapter5/High_res_resistance_surface_final_17N.tif", overwrite=T)
+
+writeRaster(tmp2, "Data/Chapter5/High_res_resistance_surface_final_17N_NO_NA.tif", overwrite=T)
+
+#########################################
+# 1km resolution ########################
+#########################################
+# Make  1km version too for safety's sake
+
+cost_final <- rast("Data/Chapter5/High_res_resistance_surface_final.tif")
+cost_final_17N <- rast("Data/Chapter5/High_res_resistance_surface_final_17N.tif")
+cost_final_17N_NO_NA <- rast("Data/Chapter5/High_res_resistance_surface_final_17N_NO_NA.tif")
+
+# Added na.rm=T -> so the missing data doesnt negate the whole pixel
+cost_final_1km <- aggregate(cost_final, fact=10, fun="mean", na.rm=T)
+writeRaster(cost_final_1km, "Data/Chapter5/Low_res_resistance_surface_final.tif", overwrite=T)
+
+cost_final_1km_17N <- aggregate(cost_final_17N, fact=10, fun="mean", na.rm=T)
+writeRaster(cost_final_1km_17N, "Data/Chapter5/Low_res_resistance_surface_final_17N.tif", overwrite=T)
+
+cost_final_1km_17N_NO_NA <- aggregate(cost_final_17N_NO_NA, fact=10, fun="mean", na.rm=T)
+writeRaster(cost_final_1km_17N_NO_NA, "Data/Chapter5/Low_res_resistance_surface_final_NO_NA_17N.tif", overwrite=T)
+
+#########################################
+# 200m resolution ########################
+#########################################
+# Make  1km version too for safety's sake
+
+# Added na.rm=T -> so the missing data doesnt negate the whole pixel
+cost_final_200m <- aggregate(cost_final, fact=2, fun="mean", na.rm=T)
+writeRaster(cost_final_200m, "Data/Chapter5/Mid_res_resistance_surface_final.tif", overwrite=T)
+
+cost_final_200m_17N <- aggregate(cost_final_17N, fact=2, fun="mean", na.rm=T)
+writeRaster(cost_final_200m_17N, "Data/Chapter5/Mid_res_resistance_surface_final_17N.tif", overwrite=T)
+
+cost_final_200m_17N_NO_NA <- aggregate(cost_final_17N_NO_NA, fact=2, fun="mean", na.rm=T)
+writeRaster(cost_final_200m_17N_NO_NA, "Data/Chapter5/Mid_res_resistance_surface_final_17N_NO_NA.tif", overwrite=T)
+
+
+
+
+
+cost_final_ras <- as(cost_final_1km,"Raster")
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addRasterImage(cond_1km, group="Original") %>%
+  addRasterImage(cost_final_ras, group="Modified") %>%
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("Original", "Modified"))
+
+
+```

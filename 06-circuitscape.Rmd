@@ -41,12 +41,14 @@ library(raster)
 library(leaflet)
 library(terra)
 
-merged_shp <- st_read("data/spatial/area_of_interest/aoi.shp")
+merged_shp <- st_read("data/spatial/area_of_interest/base_aoi.shp")
+#plot(st_geometry(merged_shp))
 roi_17N <- st_transform(merged_shp, crs=31971)
 high_pa <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp")
-simple_cost <- read_stars("Data/Chapter5/Low_res_resistance_surface.tif")
-simple_cost_terra <- rast("Data/Chapter5/Low_res_resistance_surface.tif")
+#plot(st_geometry(high_pa), col="green", add=T)
 
+simple_cost <- read_stars("Data/Chapter5/Low_res_resistance_surface_final.tif")
+simple_cost_terra <- rast("Data/Chapter5/Low_res_resistance_surface_final.tif")
 # Make a new folder for the synthesis chapter 7
 dir.create("data/Chapter7")
 
@@ -77,28 +79,35 @@ Below is the output from this analysis across the whole survey area. The colors 
 ```{r, eval=F, echo=F, message=F, include=F}
 
 # Import start polygons
-coastal_pa <- st_read("data/spatial/protected_areas/Coastal_protected_areas.shp")
-plot(st_geometry(coastal_pa))
-nrow(coastal_pa)
-length(unique(coastal_pa$NAME))
+coastal_pa <- st_read("data/spatial/protected_areas/lowland_protected_areas.shp")
+plot(st_geometry(coastal_pa), add=T, col="red")
+#nrow(coastal_pa)
+#length(unique(coastal_pa$NAME))
 plot(st_geometry(merged_shp), col=rgb(0,0,0,0.2), add=T)
 
 
 # Remove the aquatic areas - to stop them contributing current
-coastal_pa_filtered <- st_intersection(coastal_pa, merged_shp)
-plot(st_geometry(coastal_pa_filtered), col="red", add=T)
-nrow(test)
-length(unique(coastal_pa_filtered$NAME))
+#coastal_pa_filtered <- st_intersection(coastal_pa, merged_shp)
+#plot(st_geometry(coastal_pa_filtered), col="red", add=T)
+length(unique(coastal_pa$NAME))
+
+coastal_pa_filtered <- st_cast(coastal_pa, "POLYGON")
 # Check the areas
 coastal_pa_filtered$land_size <- as.numeric(st_area(coastal_pa_filtered)/(1000*1000))
 # Remove protected areas < 1km in size
-coastal_pa_filtered <- coastal_pa_filtered[coastal_pa_filtered$land_size>1,]
+#coastal_pa_filtered <- coastal_pa_filtered[coastal_pa_filtered$land_size>1,]
 
 # Remove the frontier corridor
 coastal_pa_filtered <- coastal_pa_filtered[coastal_pa_filtered$NAME!="Corredor Fronterizo",]
 
+
+#coastal_pa_filtered <- st_collection_extract(coastal_pa_filtered,
+ # type = c("POLYGON"))
+
 # Transform to 17N
 start_poly_17N <- st_transform(coastal_pa_filtered, 31971)
+st_write(start_poly_17N, "Data/Chapter5/start_polygons_17N.shp")
+st_write(coastal_pa_filtered, "Data/Chapter5/start_polygons.shp")
 
 # starting parks
 leaflet() %>%
@@ -115,11 +124,11 @@ leaflet() %>%
 
 
 # Create folders to store the results
-dir.create("Data/Chapter6/Coastal_pa_all_low_res")
-path_text <- "Data/Chapter6/Coastal_pa_all_low_res"
+dir.create("Data/Chapter6/Coastal_pa_all_low_res/")
+path_text <- "Data/Chapter6/Coastal_pa_all_low_res/"
 
 # Import the costa layer
-simple_cost <- read_stars("Data/Chapter5/Low_res_resistance_surface.tif")
+simple_cost <- read_stars("Data/Chapter5/Low_res_resistance_surface_final.tif")
 plot(simple_cost)
 
 # Start points
@@ -143,8 +152,11 @@ end_point_17N <- st_point_on_surface(end_poly_17N_filtered)
 nrow(end_point_17N)
 
 ##############
-cellmap <- raster("Data/Chapter5/Low_res_resistance_surface.tif")
 
+tmp <- project(simple_cost_terra,crs(start_point_17N))
+writeRaster(tmp,"Data/Chapter5/Low_res_resistance_surface_final_17N.tif" )
+
+cellmap <- raster("Data/Chapter5/Low_res_resistance_surface_final.tif")
 NAvalue(cellmap) <- -9999
 plot(cellmap)
 writeRaster(cellmap, paste0(path_text,"/cellmap.asc"), overwrite=T)
@@ -152,155 +164,207 @@ writeRaster(cellmap, paste0(path_text,"/cellmap.asc"), overwrite=T)
 #############
 ## Starting layers (terrestrial protected areas)
 #start_blocks <- st_intersection(terrestrial_node_17N, aoi_test) 
-start_blocks <- start_poly_17N
+#start_blocks <- start_poly_17N
 
-plot(st_geometry(start_blocks), add=T, col="black")
+lc <- rast("Data/Chapter5/Low_res_resistance_surface_final.tif")
+start <- vect("Data/Chapter5/start_polygons.shp")
+end <- vect("data/spatial/area_of_interest/high_elevation_pas.shp")
 
-  # Read in a stars object to use as a template
-  tmp <- read_stars("Data/Chapter5/Low_res_resistance_surface.tif")
+start_tmp <- as(start, "Spatial")
+start_v <- vect(start_tmp)
+end_tmp <- as(end, "Spatial")
+end_v <- vect(end_tmp)
+start$area <- round(start_v$area,2)
 
-  # Assign an id to the polygons
-  start_blocks$node <- 1:nrow(start_blocks)
-  start_blocks <- start_blocks[, c("node"),]
+end_ras <- rasterize(end,lc, field=999)
+polygons <- end_ras
+plot(polygons)
 
-  start_polygons <- st_rasterize(start_blocks, template=tmp, align=T)
-  plot(start_polygons) 
+start_p <- centroids(start_v, inside=T)
+sources <- rasterize(start_p,lc, 
+             field="area") # make the 
+end_p <- centroids(end_v, inside=T)
+grounds <- rasterize(end_p,lc, 
+             field=1) # make the area the current
 
-  # Assign the starting current points
-  # Make the polygon area the current applied
-  start_point_17N$land_size <- round(start_point_17N$land_size)
-  start_point_17N$current <- start_point_17N$land_size
-  # Buffered sources
-  #sources<- st_rasterize(st_buffer(start_point_17N[,c("current")],1000), template=tmp, align=T)
-  
-  sources<- st_rasterize(start_point_17N[,c("current")], template=tmp, align=T)
-  
-  #plot(st_centroid(start_blocks))
-  plot(sources)
+plot(cost_final_ras)
+plot(start_v, add=T)
+plot(start_p, add=T)
 
-## End layers (high elevation protected areas)
-  #end_blocks <- st_intersection(high_pa_17N, aoi_test) 
-  end_blocks <- end_poly_17N_filtered
-  nrow(end_blocks)
-  # Assign an ID to the end nodes
-  end_blocks$node<- (9999-(1:nrow(end_blocks)))
-  end_blocks <- end_blocks[, c("node")]
-  nrow(end_blocks)
-  length(unique(end_blocks$node))
-  #plot(st_geometry(end_blocks), add=T, col="red")
-  end_polygons <- st_rasterize(end_blocks, template=tmp, align=T)
-  
-  plot(end_polygons)
+lc    <- as(lc,"Raster")
+polygons_ras <- as(polygons,"Raster")
+sources_ras    <- as(sources,"Raster")
+grounds_ras    <- as(grounds,"Raster")
 
-## Add the resistance to the terminal location
-   
-   grounds<- st_rasterize(end_point_17N[,"NAME"], template=tmp, align=T)
-   grounds[grounds>0] <- 1  
-  
-plot(st_as_sfc(st_bbox(cellmap)))
-plot(st_as_sfc(st_bbox(start_polygons)), col=rgb(0,1,0,0.2), add=T)
-plot(st_as_sfc(st_bbox(end_polygons)), col=rgb(1,0,0,0.2), add=T)
-plot(st_as_sfc(st_bbox(sources)), col=rgb(0,0,1,0.2), add=T)
-plot(st_as_sfc(st_bbox(grounds)), col=rgb(0,0,1,0.2), add=T)
+plot(polygons_ras)
+plot(sources_ras)
+plot(grounds_ras)
 
-# Address this issue when they are reimported as rasters
+writeRaster(sources_ras, paste0(path_text,"sources.asc"), overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
-write_stars(start_polygons,paste0(path_text,"/start_poly_stars.tif" ))
-write_stars(end_polygons, paste0(path_text,"/end_poly_stars.tif" ))
-write_stars(sources,paste0(path_text,"/sources_stars.tif" ))
-write_stars(grounds,paste0(path_text,"/grounds_stars.tif" ))
+# Ground
+writeRaster(grounds_ras, paste0(path_text, "grounds.asc"), overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
-# read them back in with the raster package
-start_polygons <- raster(paste0(path_text,"/start_poly_stars.tif"))
-end_polygons <- raster(paste0(path_text,"/end_poly_stars.tif"))
-sources_polygons <- raster(paste0(path_text,"/sources_stars.tif"))
-grounds_polygons <- raster(paste0(path_text,"/grounds_stars.tif"))
+# Polygon
+writeRaster(polygons_ras, paste0(path_text,"regions_grid.asc"), overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
-length(unique(end_polygons[end_polygons>0]))
-length(grounds_polygons[grounds_polygons>0])
+# And a normalised version
+sources_normal <- sources_ras
+sources_normal[sources_normal>0]<-1
+plot(sources_normal)
+writeRaster(sources_normal, paste0(path_text,"/sources_normalised.asc"), overwrite=T)
+
+dir.create(paste0(path_text,"/output"))
 
 
-# Match resolutions with the cost surface (cellmap)
-plot(cellmap)
-plot(start_polygons, add=T, col="black")
-plot(grounds_polygons, add=T, col="blue")
-plot(sources_polygons, add=T, col="red")
-
-start_final     <- extend(start_polygons, cellmap)
-end_final       <- extend(end_polygons, cellmap)
-sources_final   <- extend(sources_polygons, cellmap)
-grounds_final   <- extend(grounds_polygons, cellmap)
-
-
-extent(cellmap)
-extent(start_final)
-extent(grounds_final)
-extent(end_final)
-extent(sources_final)
-
-# Sources is too small
-sources_final <- crop(sources_final, cellmap)
-start_final <- crop(start_final, cellmap)
-grounds_final <- crop(grounds_final, cellmap)
-
-# Before add them... na's must be 0's
-start_final[is.na(start_final)==T] <- 0
-end_final[is.na(end_final)==T] <- 0
-
-# Using start polys
-#regions_grid_final  <- end_final+start_final
-
-# Start points
-regions_grid_final  <- end_final
-
-
-# Return them to NA';'s
-regions_grid_final[regions_grid_final==0] <- NA
-plot(regions_grid_final, col="black")
-regions_grid_final <- extend(regions_grid_final, cellmap)
-
-extent(cellmap)
-extent(regions_grid_final)
-plot(regions_grid_final)
-
-# Final check
-
-plot(st_as_sfc(st_bbox(cellmap)))
-plot(st_as_sfc(st_bbox(start_final)), col=rgb(0,1,0,0.2), add=T)
-plot(st_as_sfc(st_bbox(grounds_final)), col=rgb(1,0,0,0.2), add=T)
-plot(st_as_sfc(st_bbox(end_final)), col=rgb(0,0,1,0.2), add=T)
-plot(st_as_sfc(st_bbox(sources_final)), col=rgb(0,1,1,0.2), add=T)
-
-# Check lengths
-# Source
-sources_final[sources_final>0]
-length(sources_final[sources_final>0])
-# Grounds 
-grounds_final[grounds_final>0]
-length(grounds_final[grounds_final>0])
-
-length(unique(end_final[end_final>0]))
-
-# This way is more reobust to manipulating resistances
+# Old cumbersome way 
+# 
+# plot(end)
+#   # Read in a stars object to use as a template
+#   tmp <- read_stars("Data/Chapter5/Low_res_resistance_surface_final_17N.tif")
+#   plot(tmp)
+#   # Assign an id to the polygons
+#   start_blocks$node <- 1:nrow(start_blocks)
+#   start_blocks <- start_blocks[, c("node"),]
+# 
+#   start_polygons <- st_rasterize(start_blocks, template=tmp, align=T)
+#   plot(start_polygons) 
+# 
+#   # Assign the starting current points
+#   # Make the polygon area the current applied
+#   start_point_17N$land_size <- round(start_point_17N$land_size)
+#   start_point_17N$current <- start_point_17N$land_size
+#   # Buffered sources
+#   #sources<- st_rasterize(st_buffer(start_point_17N[,c("current")],1000), template=tmp, align=T)
+#   
+#   sources<- st_rasterize(start_point_17N[,c("current")], template=tmp, align=T)
+#   
+#   #plot(st_centroid(start_blocks))
+#   plot(sources)
+# 
+# ## End layers (high elevation protected areas)
+#   #end_blocks <- st_intersection(high_pa_17N, aoi_test) 
+#   end_blocks <- end_poly_17N_filtered
+#   nrow(end_blocks)
+#   # Assign an ID to the end nodes
+#   end_blocks$node<- (9999-(1:nrow(end_blocks)))
+#   end_blocks <- end_blocks[, c("node")]
+#   nrow(end_blocks)
+#   length(unique(end_blocks$node))
+#   #plot(st_geometry(end_blocks), add=T, col="red")
+#   end_polygons <- st_rasterize(end_blocks, template=tmp, align=T)
+#   
+#   plot(end_polygons)
+# 
+# ## Add the resistance to the terminal location
+#    
+#    grounds<- st_rasterize(end_point_17N[,"NAME"], template=tmp, align=T)
+#    grounds[grounds>0] <- 1  
+#   
+# plot(st_as_sfc(st_bbox(cellmap)))
+# plot(st_as_sfc(st_bbox(start_polygons)), col=rgb(0,1,0,0.2), add=T)
+# plot(st_as_sfc(st_bbox(end_polygons)), col=rgb(1,0,0,0.2), add=T)
+# plot(st_as_sfc(st_bbox(sources)), col=rgb(0,0,1,0.2), add=T)
+# plot(st_as_sfc(st_bbox(grounds)), col=rgb(0,0,1,0.2), add=T)
+# 
+# # Address this issue when they are reimported as rasters
+# 
+# write_stars(start_polygons,paste0(path_text,"/start_poly_stars.tif" ))
+# write_stars(end_polygons, paste0(path_text,"/end_poly_stars.tif" ))
+# write_stars(sources,paste0(path_text,"/sources_stars.tif" ))
+# write_stars(grounds,paste0(path_text,"/grounds_stars.tif" ))
+# 
+# # read them back in with the raster package
+# start_polygons <- raster(paste0(path_text,"/start_poly_stars.tif"))
+# end_polygons <- raster(paste0(path_text,"/end_poly_stars.tif"))
+# sources_polygons <- raster(paste0(path_text,"/sources_stars.tif"))
+# grounds_polygons <- raster(paste0(path_text,"/grounds_stars.tif"))
+# 
+# length(unique(end_polygons[end_polygons>0]))
+# length(grounds_polygons[grounds_polygons>0])
+# 
+# 
+# # Match resolutions with the cost surface (cellmap)
+# plot(cellmap)
+# plot(start_polygons)
+# plot(start_polygons, add=T, col="black")
+# plot(grounds_polygons, add=T, col="blue")
+# plot(sources_polygons, add=T, col="red")
+# 
+# start_final     <- extend(start_polygons, cellmap)
+# end_final       <- extend(end_polygons, cellmap)
+# sources_final   <- extend(sources_polygons, cellmap)
+# grounds_final   <- extend(grounds_polygons, cellmap)
+# 
+# 
+# extent(cellmap)
+# extent(start_final)
+# extent(grounds_final)
+# extent(end_final)
+# extent(sources_final)
+# 
+# # Sources is too small
+# sources_final <- crop(sources_final, cellmap)
+# start_final <- crop(start_final, cellmap)
+# grounds_final <- crop(grounds_final, cellmap)
+# 
+# # Before add them... na's must be 0's
+# start_final[is.na(start_final)==T] <- 0
+# end_final[is.na(end_final)==T] <- 0
+# 
+# # Using start polys
+# #regions_grid_final  <- end_final+start_final
+# 
+# # Start points
+# regions_grid_final  <- end_final
+# 
+# 
+# # Return them to NA';'s
+# regions_grid_final[regions_grid_final==0] <- NA
+# plot(regions_grid_final, col="black")
+# regions_grid_final <- extend(regions_grid_final, cellmap)
+# 
+# extent(cellmap)
+# extent(regions_grid_final)
+# plot(regions_grid_final)
+# 
+# # Final check
+# 
+# plot(st_as_sfc(st_bbox(cellmap)))
+# plot(st_as_sfc(st_bbox(start_final)), col=rgb(0,1,0,0.2), add=T)
+# plot(st_as_sfc(st_bbox(grounds_final)), col=rgb(1,0,0,0.2), add=T)
+# plot(st_as_sfc(st_bbox(end_final)), col=rgb(0,0,1,0.2), add=T)
+# plot(st_as_sfc(st_bbox(sources_final)), col=rgb(0,1,1,0.2), add=T)
+# 
+# # Check lengths
+# # Source
+# sources_final[sources_final>0]
+# length(sources_final[sources_final>0])
+# # Grounds 
+# grounds_final[grounds_final>0]
+# length(grounds_final[grounds_final>0])
+# 
+# length(unique(end_final[end_final>0]))
+# 
+# # This way is more reobust to manipulating resistances
 
 writeRaster(regions_grid_final, paste0(path_text,"/regions_grid.asc"), overwrite=T)
 writeRaster(sources_final, paste0(path_text,"/sources.asc"), overwrite=T)
 writeRaster(grounds_final, paste0(path_text,"/grounds.asc"), overwrite=T)
 
 
-dir.create(paste0(path_text,"/output"))
 
-# COPY OVER YOUR INI FILE MANUALLY
-
-# Also do a normalise version -> starting current in irrespective of areas
-sources_normal <- sources_final
-sources_normal[sources_normal>0] <- 1
-
-sources_normal[sources_normal>0]
-plot(sources_normal)
-
-
-writeRaster(sources_normal, paste0(path_text,"/sources_normalised.asc"), overwrite=T)
+# # COPY OVER YOUR INI FILE MANUALLY
+# 
+# # Also do a normalise version -> starting current in irrespective of areas
+# sources_normal <- sources_final
+# sources_normal[sources_normal>0] <- 1
+# 
+# sources_normal[sources_normal>0]
+# plot(sources_normal)
+# 
+# 
+# writeRaster(sources_normal, paste0(path_text,"/sources_normalised.asc"), overwrite=T)
 
 ```
 
@@ -308,22 +372,22 @@ writeRaster(sources_normal, paste0(path_text,"/sources_normalised.asc"), overwri
 # Plot the result
 res_cur <- rast("data/Chapter6/Coastal_pa_all_low_res/output/pas_lowres_curmap.asc")
 # GIve it the crs
-terra::crs(res_cur) <- "EPSG:31971"
+terra::crs(res_cur) <- "EPSG:4326"
 
 res_volt <- rast("data/Chapter6/Coastal_pa_all_low_res/output/pas_lowres_voltmap.asc")
 
 end_poly <- vect("data/spatial/area_of_interest/high_elevation_pas.shp")
-end_poly_17N <- project(end_poly, "EPSG:31971")
-
+#end_poly_17N <- project(end_poly, "EPSG:31971")
+plot(end_poly)
 
 # Raw current
 #plot(res_cur)
-res_clamp <- clamp(res_cur, upper=80)
+res_clamp <- clamp(res_cur, upper=100)
 # Make low current NA
-res_clamp <- app(res_clamp, fun=function(x){ x[x < 0.1] <- NA; return(x)} )
+res_clamp <- app(res_clamp, fun=function(x){ x[x < 0.0001] <- NA; return(x)} )
 
 # Masked current (no sources)
-res_clamp <- mask(res_clamp, end_poly_17N, inverse=T)
+res_clamp <- mask(res_clamp, end_poly, inverse=T)
 
 # Check before convery to raster
 #plot(res_clamp)
@@ -333,9 +397,9 @@ pa_cond_final <- as(res_clamp, "Raster")
 
 # Reimport start and ends
 end_sf <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp")
-end_sf_17N <- st_transform(end_sf, 31971)
+#end_sf_17N <- st_transform(end_sf, 31971)
 # pdf("data/images/pa_cur_low.pdf",height=6.5, width=8)
-# plot(res_clamp)
+# plot(pa_cond_final)
 # plot(st_geometry(roi_17N), add=T)
 # plot(st_geometry(end_poly_17N), add=T, col="black")
 # dev.off()
@@ -354,7 +418,7 @@ pal <- colorNumeric(c("#0C2C84", "#41B6C4", "#FFFFCC"), values(pa_cond_final),
 leaflet() %>%
   addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
   addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
-  addRasterImage(pa_cond_final, group="Raster", colors = pal) %>% 
+  addRasterImage(pa_cond_final, group="Raster", colors = pal) #%>% 
   addPolygons(data=end_sf, fillColor = "black",
                label = end_sf$NAME, group="High_pa", stroke=F, fillOpacity = 1) %>% 
   addLayersControl(
@@ -366,8 +430,22 @@ leaflet() %>%
    #            label = tmp_lcp$ID)# %>% 
   #addCircleMarkers(data=tmp_end, col="black", radius=1)
 
+writeRaster(pa_cond_final, "data/Chapter7/central_america_connectivity_pa_size.tiff")
 
 ```
+
+
+```{r, eval=F}
+# Map for board presentation
+s <- st_read("data/Chapter7/draft_climate_hubs.shp")
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addRasterImage(pa_cond_final, group="Raster", colors = pal) %>% 
+  addPolygons(data=s, fillColor = "red",stroke=T, color="yellow",
+               label = s$id, group="High_pa")
+```
+
 
 
 The map reveals several key conclusions:
@@ -386,19 +464,16 @@ Although the above method is good to understand how the number of animals flows 
 ```{r, eval=T, echo=F, message=F, warning=F}
 # Normalised source
 res_cur_norm <- rast("data/Chapter6/Coastal_pa_all_low_res/output/pas_lowres_normalised_curmap.asc")
-terra::crs(res_cur_norm) <- "EPSG:31971"
+#terra::crs(res_cur_norm) <- "EPSG:31971"
 
 res_clamp <- clamp(res_cur_norm, upper=0.5)
 # Make low current NA
-res_clamp <- app(res_clamp, fun=function(x){ x[x < 0.02] <- NA; return(x)} )
+res_clamp <- app(res_clamp, fun=function(x){ x[x < 0.00001] <- NA; return(x)} )
 #plot(res_clamp)
-
-end_poly_17N <- st_as_sf(end_poly_17N)
 
 #And the fragment importance like this:
 res_cur_norm_ras <- raster(res_clamp)
-crs(res_cur_norm_ras) <- "EPSG:31971"
-res_cur_norm_mask <- mask(res_cur_norm_ras, end_poly_17N, inverse=T)
+res_cur_norm_mask <- mask(res_cur_norm_ras, end_poly, inverse=T)
 
 pal <- colorNumeric(c("#0C2C84", "#41B6C4", "#FFFFCC"), values(res_cur_norm_mask),
   na.color = "transparent")
@@ -423,8 +498,8 @@ leaflet() %>%
   addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
   addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
   addRasterImage(res_cur_norm_mask, group="Raster", colors = pal) %>%  #  
- # addPolygons(data=end_sf, fillColor = "black",
-  #             label = end_sf$NAME, group="High_pa", stroke=F, fillOpacity = 1) %>% 
+  addPolygons(data=high_poly, fillColor = "black",
+               label = high_poly$NAME, group="High_pa", stroke=F, fillOpacity = 1) %>% 
   addLayersControl(
     baseGroups = c("OSM (default)", "Satellite"),
     overlayGroups = c("Raster","High_pa")) %>%
@@ -435,7 +510,7 @@ leaflet() %>%
   #addCircleMarkers(data=tmp_end, col="black", radius=1)
 
 
-
+writeRaster(res_cur_norm_mask, "data/Chapter7/central_america_connectivity_normalised.tiff")
 ```
 
 

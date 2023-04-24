@@ -39,7 +39,7 @@ nasa_biomass <- rast("data/spatial/biomass/NASA_biomass_desnity_estimation.tif")
 #plot(nasa_biomass, las=1, main="")
 
 # Import the high elevation layer
-dem_raster <- rast("data/spatial/SRTM90_V4/SRTM90_V4.elevation.tif")
+dem_raster <- rast("data/spatial/SRTM90_V4/SRTM90_V4.elevation_all.tif")
 #plot(dem_raster, las=1, main="")
 high_raster <- dem_raster
 # Make a binary raster
@@ -55,8 +55,8 @@ high_terra = as.polygons(high_raster)
 high_forest_biomass <- crop(nasa_biomass, high_terra, mask=T)
 # Make it binary
 high_forest_binary <- high_forest_biomass
-high_forest_binary[high_forest_binary<25] <- NA
-high_forest_binary[high_forest_binary>25] <- 1
+high_forest_binary[high_forest_binary<50] <- NA
+high_forest_binary[high_forest_binary>=50] <- 1
 
 plot(high_forest_binary, col="red")
 
@@ -80,6 +80,20 @@ high_forest_poly  <- as.polygons(non_protected_ras)
 
 high_forest_sf <- sf::st_as_sf(high_forest_poly)
 high_pa_sf <- sf::st_as_sf(high_pa)
+sf_use_s2(FALSE)
+
+
+high_pa_sf <- st_make_valid(high_pa_sf)
+high_pa_sf <- st_buffer(high_pa_sf, 0)
+
+high_forest_sf <- st_make_valid(high_forest_sf)
+high_forest_sf <- st_buffer(high_forest_sf, 0)
+
+# Snip out mexico and columbia
+high_pa_sf <- st_intersection(high_pa_sf, merged_shp)
+high_forest_sf <- st_intersection(high_forest_sf, merged_shp)
+
+plot(high_forest_sf)
 
 
 ```
@@ -105,6 +119,86 @@ addLegend(colors=c("red", "green"), labels = c("unprotected", "protected"),
 
 
 We estimate that (`r as.character(round(as.numeric(sum(st_area(high_pa_sf))/(1000*1000)),1))`)  km^2^ of high elevation (>1500m) forests are protected. However, substantial tracts of important forest remain unprotected (`r as.character(round(as.numeric(sum(st_area(high_forest_sf))/(1000*1000)),1)) `) km^2^, the vast majority of such forests lie in Guatemala and Honduras. There appears to be limited potential for high elevation protected area expansion outside of these counties, although some expansions may be possible around La Amistad (Costa Rica and Panama). 
+
+We can repeat this process for lowland habitat too:
+
+```{r, include=F, message=F, warning=F}
+low_raster <- dem_raster
+# Make a binary raster
+low_raster[low_raster>500] <- NA
+low_raster[low_raster<=500] <- 1
+#plot(low_raster)
+# Convert to polygon
+low_terra = as.polygons(low_raster)
+#plot(low_terra)
+
+# Crop the biomas layer to the low elvation zones
+
+low_forest_biomass <- crop(nasa_biomass, low_terra, mask=T)
+# Make it binary
+low_forest_binary <- low_forest_biomass
+low_forest_binary[low_forest_binary<50] <- NA
+low_forest_binary[low_forest_binary>=50] <- 1
+
+plot(low_forest_binary, col="red")
+
+
+# Import the protected areas
+low_pa <- vect("data/spatial/protected_areas/lowland_protected_areas.shp")
+plot(low_pa, add=T, col="green")
+low_pa_sf <- sf::st_as_sf(low_pa)
+low_pa_ras <- rasterize(low_pa,low_forest_binary, 
+             field=100, background=1)
+plot(low_pa_ras)
+
+non_protected_ras <- low_pa_ras*low_forest_binary
+non_protected_ras[non_protected_ras==100] <- NA
+
+plot(non_protected_ras, col="red")
+plot(low_pa, col="green", add=T, border=NA)
+
+# convert to polygons
+low_forest_poly  <- as.polygons(non_protected_ras)
+
+low_forest_sf <- sf::st_as_sf(low_forest_poly)
+low_pa_sf <- sf::st_as_sf(low_pa)
+sf_use_s2(FALSE)
+
+
+low_pa_sf <- st_make_valid(low_pa_sf)
+low_pa_sf <- st_buffer(low_pa_sf, 0)
+
+low_forest_sf <- st_make_valid(low_forest_sf)
+low_forest_sf <- st_buffer(low_forest_sf, 0)
+
+# Snip out mexico and columbia
+low_pa_sf <- st_intersection(low_pa_sf, merged_shp)
+low_forest_sf <- st_intersection(low_forest_sf, merged_shp)
+
+plot(low_forest_sf)
+```
+
+
+```{r, message=F, warning=F, echo=F}
+leaflet() %>%
+   addProviderTiles("Esri.WorldGrayCanvas", group="Basic") %>%
+   addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+   addProviderTiles("OpenStreetMap", group="OSM") %>%
+#  addRasterImage(low_forest_ras, group="Raster") %>% 
+  addPolygons(data=low_pa_sf, fillColor = "green",
+               label = low_pa_sf$NAME, stroke=F, fillOpacity = 0.6, , group="Protected") %>% 
+  addPolygons(data=low_forest_sf, fillColor = "red",
+               , stroke=F, fillOpacity = 0.6, group="Unprotected") %>%
+  addLayersControl(
+    baseGroups = c("Basic", "Satellite", "OSM"),
+    overlayGroups = c("Protected", "Unprotected")) %>% 
+addLegend(colors=c("red", "green"), labels = c("unprotected", "protected"),
+    title = "low elevation forest status")
+  
+```
+
+
+
 
 ## Existing corridors
 Given that we have identified putative climate corridors, it follows that we should ask if these corridors are already covered by existing/proposed corridors. Below we explore the overlay of the Mesoamerican Biological Corridors (MBCs) with those identified in this mapping exercise.

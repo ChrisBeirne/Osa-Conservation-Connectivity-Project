@@ -20,6 +20,7 @@ library(nngeo)
 library(dplyr)
 library(leaflet)
 library(ggbiplot)
+library(leaflet.extras)
 
 # How many coastal protected areas
 library(beeswarm)
@@ -27,21 +28,35 @@ library(MetBrewer)
 library(plotly)
 library(stats)
 library(MuMIn)
+library(terra)
 
 
 # Import required data files
 
 merged_shp <- st_read("data/spatial/area_of_interest/aoi.shp")
+base_shp <- st_read("data/spatial/area_of_interest/base_aoi.shp")
 mangrove_large <- st_read("data/spatial/mangroves/mangrove_large_1kmsq.shp")
 high_pa <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp")
-roi_17N <- st_transform(merged_shp, crs=31971)
+high_pa <- st_cast(high_pa, "POLYGON")
+#plot(st_geometry(high_pa))
+
+
+roi_17N <- st_transform(base_shp, crs=31971)
 # Read in the cost surface 
 
-cond_1km <- raster("Data/Chapter5/Low_res_resistance_surface.tif")
-cond_1km_stars <- read_stars("Data/Chapter5/Low_res_resistance_surface.tif")
+# old
+#cond_1km       <- raster("Data/Chapter5/Low_res_resistance_surface.tif")
+cond_1km       <- raster("Data/Chapter5/Low_res_resistance_surface_final.tif")
+cond_1km_terra       <- rast("Data/Chapter5/Low_res_resistance_surface_final.tif")
+cond_1km_stars  <- read_stars("Data/Chapter5/Low_res_resistance_surface_final.tif")
+
+#plot(cond_1km)
 
 # Transform to 17N
 mangrove_17N <- st_transform(mangrove_large,31971)
+cond_1km_17N <- read_stars("Data/Chapter5/Low_res_resistance_surface_final_17N.tif")
+
+cond_1km_utm <- raster("Data/Chapter5/Low_res_resistance_surface_final_NO_NA_17N.tif")
 
 # Give the fragments a unique code
 mangrove_17N$ID <- paste0("MAN",sprintf("%04d", 1:nrow(mangrove_17N)))
@@ -69,7 +84,7 @@ high_pa_17N <- st_transform(high_pa,31971)
 #plot(cond_1km)
 #plot(st_geometry(high_pa_17N), add=T, col="black", border=NA)
 
-tmp <- projectRaster(cond_1km, crs = 4326)
+#tmp <- projectRaster(cond_1km, crs = 4326)
 
 
 # Centroids of all shapes
@@ -78,8 +93,8 @@ end_points <- st_centroid(high_pa_17N)
 
 # Try adding in some other locations (to account for large polygons)
 set.seed(1200)
-test <- st_sample(high_pa_17N, 120, type = "hexagonal")
-
+test <- st_sample(high_pa_17N, 250, type = "hexagonal")
+plot(st_geometry(high_pa_17N))
 #plot(st_geometry(test), add=T, pch=19, cex=0.5, col="blue")
 
 # Intersect to get the information back
@@ -143,10 +158,10 @@ tmp <- st_centroid(mangrove_17N)
 # mangrove_reduced <- st_intersection(mangrove_17N, r.to.poly)
 
 
-cond_1km[is.na(cond_1km)==T] <- 0.0001
+cond_1km[is.na(cond_1km)==T] <- 0.000001
 #cond_1km[cond_1km==0] <- 1
 
-# I need a conducance layer for this analysis - just use the mean. Other functions are available. 
+# I need a conductance layer for this analysis - just use the mean. Other functions are available. 
 cond_derived <- transition(cond_1km,function(x) mean(x), 8)
 
 
@@ -243,22 +258,24 @@ saveRDS(res_mangrove_shp, "data/Chapter3/lcp_test/mangrove_to_protected_test_shp
 
 ```{r ch5_3, eval=F, include=F}
 # Import coastal protected areas
-terrestrial_pa <- st_read("data/spatial/protected_areas/Terrestrial_focal_areas.shp")
+terrestrial_pa <- st_read("data/spatial/protected_areas/lowland_protected_areas.shp")
 
 terrestrial_17N <- st_transform(terrestrial_pa, 31971)
 head(terrestrial_17N)
 # Simplify the dataframe 
-terrestrial_17N <- terrestrial_17N[,c("NAME", "DESIG_E","DESIG_T", "sovrgnt", "geounit", "GIS_ARE")]
+colnames(terrestrial_17N)
+terrestrial_17N <- terrestrial_17N[,c("NAME", "DESIG_E","DESIG_T", "GIS_ARE", "area")]
 
 
 # Give the fragments a unique code
 terrestrial_17N$ID <- paste0("TERR",sprintf("%04d", 1:nrow(terrestrial_17N)))
 head(terrestrial_17N)
-# cond_1km[is.na(cond_1km)==T] <- 0.0001
-# #cond_1km[cond_1km==0] <- 1
-# 
-# # I need a conducance layer for this analysis - just use the mean. Other functions are available. 
-# cond_derived <- transition(cond_1km,function(x) mean(x), 8)
+
+ 
+ # # I need a conducance layer for this analysis - just use the mean. Other functions are available. 
+cond_derived <- transition(cond_1km_utm,function(x) mean(x), 8)
+
+# SAVE THIS IF IT EVER RUNS
 
 
 res_terrestrial <- list()
@@ -271,9 +288,12 @@ for(i in 1:nrow(terrestrial_17N))
   # If it isnt on the mainland, break the loop
   #tmp <- st_intersects(st_centroid(terrestrial_17N[i,]), roi_17N, sparse=F)
   #extract(cond_1km, A)
-    # Find 20 nearest neighbours
+    # Find nearest neighbours - in this case 3
+    # If you need it to run fast us k =1   
     near_locs <- st_nn(terrestrial_17N[i,], end_points, k=1)
-    near_locs <- near_locs[[1]]
+    near_locs <- unlist(near_locs)
+    
+    #near_locs <- near_locs1]]
     
    # Yep that works now 
    #plot(st_geometry(roi_17N), col="lightgrey", border=F)
@@ -293,7 +313,7 @@ for(i in 1:nrow(terrestrial_17N))
       # Erase the previous
       lc_path <-NULL
       
-      #plot(cond_1km)
+      #plot(cond_1km_utm)
       #plot(A, add=T)
       #plot(B, add=T)
       # I have conductance so I need : function(x) 1/mean(x)
@@ -348,7 +368,37 @@ saveRDS(res_terrestrial, "data/Chapter3/lcp_test/terrestrial_to_protected.rds")
 saveRDS(res_terrestrial_shp, "data/Chapter3/lcp_test/terrestrial_to_protected_shp.rds")
 
 # Return cond_1km to NA;s
-cond_1km[cond_1km==0.0001] <- NA 
+cond_1km[cond_1km==0.00001] <- NA 
+
+
+res_terrestrial_wgs <- st_transform(res_terrestrial_shp, crs=4326)
+
+# For the presentation
+pdf("data/plots/lcp_lowland_tohighland.pdf", height=10, width=14)
+plot(st_geometry(res_terrestrial_wgs), col="white")
+plot(cond_1km, add=T)
+plot(st_geometry(high_pa), add=T, border=F, col="blue")
+plot(st_geometry(terrestrial_pa), add=T, border=F, col="red")
+plot(st_geometry(res_terrestrial_wgs), add=T)
+dev.off()
+
+pdf("data/plots/start_end.pdf", height=10, width=14)
+plot(st_geometry(res_terrestrial_wgs), col="white")
+plot(cond_1km, add=T)
+plot(st_geometry(high_pa), add=T, border=F, col="blue")
+plot(st_geometry(terrestrial_pa), add=T, border=F, col="red")
+#plot(st_geometry(res_terrestrial_wgs), add=T)
+dev.off()
+
+pdf("data/plots/resistance_surafce.pdf", height=10, width=14)
+plot(st_geometry(res_terrestrial_wgs), col="white")
+plot(cond_1km, add=T)
+#plot(st_geometry(high_pa), add=T, border=F, col="blue")
+#plot(st_geometry(terrestrial_pa), add=T, border=F, col="red")
+#plot(st_geometry(res_terrestrial_wgs), add=T)
+dev.off()
+
+
 
 ```
 
@@ -460,41 +510,24 @@ res_terrestrial_shp <- readRDS("data/Chapter3/lcp_results/LCP_nearest_pa_res_shp
 
 
 library(sf)
-focal_pa <- readRDS("data/spatial/WDPA_protected_areas/focal_area_pa_shp.RDS")
-
+focal_pa <- readRDS("data/spatial/WDPA_protected_areas/all_area_pa_shp.RDS")
 #plot(st_geometry(focal_pa))
 #plot(st_geometry(focal_pa[focal_pa$DESIG_TYPE!="International",]))
+#plot(cond_1km_17N)
 
-focal_pa_17N <- st_transform(focal_pa,crs(res_mangrove_shp))
-pa_ras <- st_rasterize(focal_pa_17N, template=cond_1km_stars, align=T)
-pa_ras[pa_ras>0] <- 1
-pa_ras[is.na(pa_ras)==T] <- 0
+template_proj <- vect(focal_pa_17N)
+template_ras <- rast(cond_1km_17N)
+
+pa_ras <- rasterize(focal_pa_17N, template_ras)
 plot(pa_ras)
-
-test <- st_contour(pa_ras,contour_lines=F, breaks=c(-0.5, 0.5,1.5))
-test <- test[test$GIS_AREA=="[0.5,1.5)",]
-plot(st_geometry(test))
-
-st_area(test)
-test <- st_cast(test, "POLYGON")
-test$UID <- 1:nrow(test)
-contigous_pa_area <- test
-
-contigous_pa_area$contig_area <- as.numeric(st_area(test)/(1000*1000))
-contigous_pa_area <- contigous_pa_area[, c("contig_area")]
-
-contigous_pa_area <- st_make_valid(contigous_pa_area)
-
-focal_pa_17N <- st_make_valid(focal_pa_17N)
+pa_ras <- raster(pa_ras)
+pa_ras[is.na(pa_ras)==T]<- 0
+plot(pa_ras)
+# Old 
+#pa_ras <- st_rasterize(focal_pa_17N, template=cond_1km_17N, align=T)
 
 
-test <- st_join(focal_pa_17N, contigous_pa_area)
-test$geometry <- NULL
-test <- test[, c("ORIG_NAME", "contig_area")]
-head(test)
-test2<- test %>% group_by(ORIG_NAME) %>% summarise(sum=sum(contig_area), na.rm=T)
-
-write_stars(pa_ras,"data/Chapter3/lcp_results/contiguous_pa_raster.tif", overwrite=T)
+writeRaster(pa_ras,"data/Chapter3/lcp_results/contiguous_pa_raster.tif", overwrite=T)
 st_write(contigous_pa_area,"data/Chapter3/lcp_results/contigous_pa_area.shp", append=F)
 
 ```
@@ -516,9 +549,9 @@ write_stars(biomass_17N, "data/spatial/biomass/NASA_biomass_desnity_estimation_1
 ```{r ch5_9, echo=F, eval=F}
 # Add proportion of forest
 
-gfc_2020 <- read_stars("data/spatial/gfc/global_forest_change_2020_v1_8.treecover2000.tif")
+gfc_2020 <- read_stars("data/spatial/gfc/global_forest_change_2021_v1_9.treecover2000.tif")
 gfc_17N <- st_warp(gfc_2020,cond_1km_stars)
-write_stars(gfc_17N,"data/spatial/gfc/global_forest_change_2020_v1_8.treecover2000_17N.tif")
+write_stars(gfc_17N,"data/spatial/gfc/global_forest_change_2021_v1_9.treecover2000_17N.tif")
 ```
 
 
@@ -530,29 +563,27 @@ res_terrestrial_17N <- st_transform(res_terrestrial_shp, 31971)
 
 # Proportion protected
 pa_ras <- raster("data/Chapter3/lcp_results/contiguous_pa_raster.tif")
+plot(pa_ras)
 res_mangrove$prop_protected <- NA
 res_terrestrial$prop_protected <- NA
 
 # Average forest cover
-gfc_17N<- read_stars("data/spatial/gfc/global_forest_change_2020_v1_8.treecover2000_17N.tif")
+gfc_17N<- read_stars("data/spatial/gfc/global_forest_change_2021_v1_9.treecover2000_17N.tif")
 gfc_17N <- as(gfc_17N, "Raster")
 res_mangrove$prop_forest <- NA
 res_terrestrial$prop_forest <- NA
 
 # Cross borders?
 #Import the country shape
-focal_shp <- st_read("data/spatial/area_of_interest/focal_countries.shp")
-focal_shp_17N <- st_transform(focal_shp, st_crs(res_mangrove_17N))
+focal_shp <- st_read("data/spatial/area_of_interest/all_countries_expanded.shp")
+focal_shp_17N <- st_transform(focal_shp, st_crs(res_terrestrial_17N))
 
 res_mangrove$nCountries <- NA
 res_terrestrial$nCountries <- NA
 
 # I have changed the code so that some high elevation protected areas are filtered out (small ones)
 
-all_pa <- readRDS( "data/spatial/WDPA_protected_areas/focal_area_pa_shp.RDS")
-
-
-
+#all_pa <- readRDS( "data/spatial/WDPA_protected_areas/focal_area_pa_shp.RDS")
 #Use the all protected area to fill out some of these stats
 
 # # Average biomass
@@ -562,6 +593,13 @@ all_pa <- readRDS( "data/spatial/WDPA_protected_areas/focal_area_pa_shp.RDS")
 # # load elevation coming with the terra pakage
 # r <- rast("data/spatial/gfc/global_forest_change_2020_v1_8.treecover2000_17N.tif")
 # plot(r)
+
+
+high_contiguous <- st_read("data/spatial/area_of_interest/high_elevation_pas_contiguous.shp")
+high_contiguous_utm <- st_transform(high_contiguous, crs=st_crs(end_points))
+
+contiguous_dat <- st_intersection(end_points, high_contiguous_utm)
+
 
 # End point area
 res_mangrove$end_area <- NA 
@@ -601,6 +639,7 @@ for(i in 1:nrow(res_terrestrial))
 {
    tmp <- res_terrestrial$ID[i]
    tmp_shp <- res_terrestrial_17N[res_terrestrial_17N$ID==tmp,]
+   #plot(st_geometry(tmp_shp))
    #mask(cond_1km_stars, tmp_shp, mean)
    tmp_res <- raster::extract(pa_ras, tmp_shp)
    
@@ -609,10 +648,10 @@ for(i in 1:nrow(res_terrestrial))
    tmp_res <- raster::extract(gfc_17N, tmp_shp)
    res_terrestrial$prop_forest[i] <- round(mean(tmp_res[[1]], na.rm=T),2)
    # TO deal with 0's
-   tmp3 <- focal_pa[focal_pa$NAME==res_terrestrial$endID[i],]$GIS_AREA
+   tmp3 <- contiguous_dat[contiguous_dat$NAME==res_terrestrial$endID[i],]$lw_r_k2
    if(length(tmp3)>0)
       {
-         res_terrestrial$end_area[i] <- focal_pa[focal_pa$NAME==res_terrestrial$endID[i],]$GIS_AREA
+         res_terrestrial$end_area[i] <- tmp3[1]
       }
          # Intersection countries
   tmp2 <- st_intersection(tmp_shp, focal_shp_17N)
@@ -627,24 +666,44 @@ head(res_mangrove)
 head(res_terrestrial)
 
 # Get the starting country
-tmp <- st_intersection(st_buffer(mangrove_17N,10000), focal_shp_17N)
+#tmp <- st_intersection(st_buffer(mangrove_17N,10000), focal_shp_17N)
 
-tmp <- tmp[duplicated(tmp$ID)==F,]
-tmp <- tmp[, c("ID", "AREA_KM2", "name")]
-tmp$geometry <- NULL
-colnames(tmp) <- c("ID", "start_area", "start_country")
+#tmp <- tmp[duplicated(tmp$ID)==F,]
+#tmp <- tmp[, c("ID", "AREA_KM2", "name")]
+#tmp$geometry <- NULL
+#colnames(tmp) <- c("ID", "start_area", "start_country")
 
-res_mangrove_final <- left_join(res_mangrove, tmp)
+#res_mangrove_final <- left_join(res_mangrove, tmp)
 
 # Get the starting country (parks)
+test <- st_intersection(st_centroid(terrestrial_17N), focal_shp_17N)
+test$geometry <- NULL
 
-tmp <- terrestrial_17N[, c("ID","NAME","DESIG_E", "geounit", "GIS_ARE")]
+res_terrestrial_final <- left_join(res_terrestrial, test[,c("ID", "name")])
 
-tmp$geometry <- NULL
-head(tmp)
-colnames(tmp) <- c("ID", "start_pa", "designation", "start_country", "start_area")
 
-res_terrestrial_final <- left_join(res_terrestrial, tmp)
+# Add the startring PA
+test <- terrestrial_17N[,c("NAME", "ID")]
+test$geometry <- NULL
+colnames(test) <- c("start_pa","ID")
+res_terrestrial_final <- left_join(res_terrestrial_final, test)
+
+# Add starting PA contiguous area
+low_contiguous <- st_read("data/spatial/area_of_interest/low_elevation_pas_contiguous.shp")
+low_contiguous_utm <- st_transform(low_contiguous, crs=st_crs(end_points))
+
+low_contiguous_dat <- st_intersection(st_centroid(terrestrial_17N), low_contiguous_utm)
+test <- low_contiguous_dat[,c("ID", "lw_r_k2")]
+
+
+head(res_terrestrial_final)
+test$geometry <- NULL
+colnames(test) <- c("ID", "start_area")
+res_terrestrial_final <- left_join(res_terrestrial_final, test)
+
+head(res_terrestrial_final)
+colnames(res_terrestrial_final)[colnames(res_terrestrial_final)=="name"] <- "start_country"
+
 
 # Write final datasets
 saveRDS(res_terrestrial_final, "data/Chapter3/lcp_results/terrestrial_final_results.rds")
@@ -714,25 +773,30 @@ In the following section, we compare the LCP characteristics between different c
 
 ```{r ch5_13, echo=F, warning=F, message=F}
 # Setup the plots
+# Remove mexican and columbian parks 
+res_terrestrial_final <- res_terrestrial_final[!(res_terrestrial_final$start_country %in% c("Colombia", "Mexico")),]
+
+# Sort out NA's
+res_terrestrial_final <- res_terrestrial_final[is.na(res_terrestrial_final$start_country)==F,]
 
 # remove parks < 1km2
-res_terrestrial_final <- res_terrestrial_final[res_terrestrial_final$start_area>1,]
+res_terrestrial_final <- res_terrestrial_final[is.na(res_terrestrial_final$start_area)==F,]
 
 # Remove end locations without an area
-res_terrestrial_final <- res_terrestrial_final[res_terrestrial_final$start_area>1,]
+res_terrestrial_final <- res_terrestrial_final[is.na(res_terrestrial_final$end_area)==F,]
 
-res_terrestrial_final$end_area[res_terrestrial_final$endID=="Complejo Volcánico San Cristóbal ? Casitas- Chonco"] <- 314
+#res_terrestrial_final$end_area[res_terrestrial_final$endID=="Complejo Volcánico San Cristóbal ? Casitas- Chonco"] <- 314
 
 
 # Add country colours
 key <- data.frame(start_country=levels(as.factor(res_terrestrial_final$start_country)),
-                  cols=met.brewer("Archambault", 7)[1:7])
+                  cols=met.brewer("Austria", 7)[1:7])
 
 res_terrestrial_final <- left_join(res_terrestrial_final, key)
 
 ```
 
-#### Number of coastal protected areas available
+#### Number of protected areas available
 
 Understanding how many different potential source populations there re per country can give an idea of where might be appropriate to start conservation initiatives. The barplot below shows the number of coastal protected areas (>1km^2^) by focal country. As you can see, Costa Rica has the largest number of coastal protected areas, followed by El Salvador then Panama. Belize has the least. 
 
@@ -741,8 +805,8 @@ Understanding how many different potential source populations there re per count
 #barplot(table(res_terrestrial_final$start_country), col=met.brewer("Archambault")[1:7], las=1,
 #        cex.axis)
 
-tmp <- res_terrestrial_final %>% group_by(start_country) %>% summarise(n())
 
+tmp <- res_terrestrial_final %>% group_by(start_country) %>% summarise(n())
 
 fig <- plot_ly(
 
@@ -972,10 +1036,136 @@ fig
 # #summary(ter.pca)
 # 
 # ggbiplot(ter.pca, groups=res_terrestrial_final$start_country)
+res_terrestrial_final$PC1 <- components$PC1
+res_terrestrial_final$PC2 <- components$PC2
 
 ```
 
 The graph shows that axis 1 is principally associated with increasing starting area size, forest quality and proportions protected as you move fromn left to right. Axis two is principally associated with path length, with climate corridors increasing in length from bottom to top. 
+
+
+
+```{r, eval=F}
+
+###############################################################
+# FOR THE PRESENTATION TO DONORS ##############################
+###############################################################
+
+
+# Add in the starting UTMS
+tmp <- terrestrial_17N
+tmp$x <- st_coordinates(st_centroid(tmp))[,1]
+tmp$y <- st_coordinates(st_centroid(tmp))[,2]
+tmp$geometry <- NULL
+
+tmp$z_x <- stdize(tmp$x)
+tmp$z_y <- stdize(tmp$y)
+
+tmp2 <- res_terrestrial_final
+
+tmp2$z_x<- stdize(tmp2$PC1)
+tmp2$z_y<- stdize(tmp2$PC2)
+
+tmp <- tmp[tmp$ID %in% tmp2$ID,]
+
+plot(tmp$z_x, tmp$z_y, asp=1)
+plot(tmp2$z_x, tmp2$z_y, asp=1)
+
+tmp$f <- 1
+tmp2$f <- 2
+
+
+tmp3 <- tmp2[,c("ID", "start_country")]
+# Add colours 
+final_key <- left_join(tmp3, key)
+
+df <- rbind(tmp[,c("ID", "z_x", "z_y", "f")],
+      tmp2[,c("ID", "z_x", "z_y", "f")])
+
+
+df <- left_join(df, final_key)
+
+
+fig <- df %>%
+
+  plot_ly(
+
+    x = ~z_x,
+
+    y = ~z_y,
+
+    frame = ~f,
+
+    type = 'scatter',
+
+    mode = 'markers',
+
+    showlegend = F,
+ 
+    color = ~df$start_country, colors = df$cols
+
+  )
+
+
+fig
+
+
+
+fig <- fig %>%
+
+  animation_opts(
+
+    2000, 
+    transition=2000,
+    easing = "linear", redraw = FALSE
+
+  )
+
+fig
+
+
+
+# gganimate it
+
+
+
+library(gganimate)
+
+library(ggplot2)
+library(gganimate)
+colnames(df)[colnames(df)=="start_country"] <- "Country"
+
+test <-ggplot(df, aes(z_x, z_y, color=cols)) + 
+  geom_point()
+dev.off()
+
+test<- ggplot(df, aes(z_x, z_y, group=Country, color=Country)) + 
+  geom_point() +  theme_classic() + labs(x ="X", y = "Y") +
+  # Increase lengend point size
+  guides(colour = guide_legend(override.aes = list(size=6))) +
+  
+  
+  # Here comes the gganimate code
+  transition_states(
+    f,
+    transition_length = 2,
+    state_length = 1,
+    wrap=F
+  ) +
+  enter_fade() + 
+  exit_shrink() +
+  ease_aes('sine-in-out')
+
+animate(test, renderer = gifski_renderer(loop = FALSE))
+
+# Stop looping
+altrenderer <- gifski_renderer(loop=FALSE)
+
+anim_save("data/images/animate.gif", renderer=altrenderer)
+
+```
+
+
 
 #### The 'sweet spot'
 
@@ -997,10 +1187,10 @@ res_terrestrial_final$PCA2 <- components$PC2
 
 plot(res_terrestrial_final$PCA1, res_terrestrial_final$PCA2, col=res_terrestrial_final$cols, pch=19)
 
-xlow <- 0.2
-xhigh <- 2.2
-ylow <- -1.1
-yhigh <- 0.6
+xlow <- 0
+xhigh <- 5
+ylow <- -5
+yhigh <- 5
 
 polygon(c(xlow,xlow,xhigh,xhigh),
         c(ylow,yhigh,yhigh,ylow),
@@ -1015,7 +1205,7 @@ ter_finalists <- res_terrestrial_final[res_terrestrial_final$PCA1>xlow & res_ter
 Below we plot these `r nrow(ter_finalists)` climate on a map to see if we can find a subset of wider landscapes which represent tartgets for climate corridor restoration. 
 
 ```{r ch_24b, echo=F, message=F, warning=F, include=F}
-coastal_pa  <- st_read("data/spatial/protected_areas/Coastal_protected_areas.shp")
+#coastal_pa  <- st_read("data/spatial/protected_areas/Coastal_protected_areas.shp")
 
 ```
 
@@ -1039,19 +1229,62 @@ leaflet() %>%
   addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
   addPolygons(data=tmp_pa, fillColor = "orange",
                label = tmp_pa$NAME, group="High_pa", stroke=F) %>%
-  addPolygons(data=coastal_pa, fillColor = "blue",
-               label = coastal_pa$NAME, group="low_pa", stroke=F) %>% 
+  addPolygons(data=terrestrial_pa, fillColor = "blue",
+               label = terrestrial_pa$NAME, group="low_pa", stroke=F) %>% 
   
   addLayersControl(
     baseGroups = c("OSM (default)", "Satellite"),
-    overlayGroups = c("Raster","High_pa")) %>%
+    overlayGroups = c("High_pa")) %>%
   addPolylines(data=ter_finalists_shp_wgs, weight = 2, color = "black",
-               label = ter_finalists_shp_wgs$start_pa) 
-
-
+               label = ter_finalists_shp_wgs$start_pa) %>%
+  addFullscreenControl()
 
 
 ```
+
+We can also colour by score and look for patterns:
+
+
+```{r}
+library(RColorBrewer)
+pal = colorRampPalette(c("blue", "red"))
+tmp <- res_terrestrial_final[order(res_terrestrial_final$PCA1),]
+plot(tmp$PCA1, tmp$PCA2, col=pal(nrow(tmp)), pch=19)
+tmp$cols_new <- pal(nrow(tmp))
+
+# Make a lookup
+tmp_lookup<- tmp[,c("ID", "cols_new")]
+tmp_res<- left_join(res_terrestrial_shp, tmp_lookup, by="ID")
+tmp_res <- st_transform(tmp_res, 4327)
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  addPolygons(data=high_pa, fillColor = "orange", fillOpacity = 0.4,
+               label = high_pa$NAME, group="High_pa", stroke=F) %>%
+  addPolygons(data=terrestrial_pa, fillColor = "blue",
+               label = terrestrial_pa$NAME, group="low_pa", stroke=F) %>% 
+  
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("High_pa")) %>%
+  addPolylines(data=tmp_res, weight = 2, color = tmp_res$cols_new,
+               label = tmp_res$start_pa) %>%
+  addFullscreenControl()
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ```{r ch_25b, echo=F, message=F, warning=F, include=F}
 st_write(ter_finalists_shp_wgs, "data/Chapter7/PA_priority.shp", append=F)
@@ -1059,7 +1292,7 @@ st_write(ter_finalists_shp_wgs, "data/Chapter7/PA_priority.shp", append=F)
 ```
 
 ### Conclusions
-As you can see form the obove map, the selected climate corridors are principally located in Panama, Costa Rica and Honduras. There is not much potential for restoration of climate corridors in El Salvador, and to a lesser extent Nicaragua, Guatamal and Belize. 
+As you can see form the above map, the selected climate corridors are principally located in Panama, Costa Rica and Honduras. There is not much potential for restoration of climate corridors in El Salvador, and to a lesser extent Nicaragua, Guatamal and Belize. 
 
 The majority of corridors lie in and around La Amistad protected area, from both the Caribbean and Pacific directions, highlighting the importance of these regions. 
 
@@ -1426,8 +1659,8 @@ leaflet() %>%
   addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
   addPolygons(data=tmp_pa, fillColor = "orange",
                label = tmp_pa$NAME, group="High_pa", stroke=F) %>%
-  addPolygons(data=coastal_pa, fillColor = "blue",
-               label = coastal_pa$NAME, group="low_pa", stroke=F) %>% 
+  addPolygons(data=terrestrial_pa, fillColor = "blue",
+               label = terrestrial_pa$NAME, group="low_pa", stroke=F) %>% 
   
   addLayersControl(
     baseGroups = c("OSM (default)", "Satellite"),
@@ -1479,9 +1712,344 @@ leaflet() %>%
 ## Case study regions
 Below we highlight the regions selected for the high resolution case studies in the following chapter. 
 
-```{r ch_1a, echo=F, message=F, warning=F}
-knitr::include_graphics("data/images/priorities.PNG")
+```{r ch_1b, echo=F, message=F, warning=F}
+library(terra)
+coords <- c(-84, -82.5,8.38,9.38); aoi <-  ext(coords)
+cs1 <- as.polygons(aoi, crs="4326")
+#plot(cs1)
+
+coords <- c(-86.025, -84.82711,
+           10.54061, 11.2); aoi <-  ext(coords)
+cs2 <- as.polygons(aoi, crs="4326")
+plot(cs2)
+
+
+coords <- c(-89.215, -87.8128,
+           14.9906, 16.2100); aoi <-  ext(coords)
+cs3 <- as.polygons(aoi, crs="4326")
+plot(cs3)
+
+coords <- c(-87.55715, -86.1745661,
+           15.0431, 15.8875); aoi <-  ext(coords)
+cs4 <- as.polygons(aoi, crs="4326")
+plot(cs4)
+
+coords <- c(-86.05495, -84.548,
+           15.1588, 16.113666); aoi <-  ext(coords)
+cs5 <- as.polygons(aoi, crs="4326")
+plot(cs5)
+
+coords <- c(-84.516, -83.421,
+           9.967, 11.214); aoi <-  ext(coords)
+cs6 <- as.polygons(aoi, crs="4326")
+plot(cs6)
+
+coords <- c(-83.367, -82.289,
+           9.022, 10.2596); aoi <-  ext(coords)
+cs7 <- as.polygons(aoi, crs="4326")
+plot(cs7)
+
+coords <- c(-82.622,-81.566,
+          8.4930, 9.2234); aoi <-  ext(coords)
+cs8 <- as.polygons(aoi, crs="4326")
+plot(cs8)
+
+coords <- c(-81.363,-79.696,
+          8.251, 9.1969); aoi <-  ext(coords)
+cs9 <- as.polygons(aoi, crs="4326")
+plot(cs9)
+
+coords <- c(-78.74,-77.05,
+          7.5177, 8.7677); aoi <-  ext(coords)
+cs10 <- as.polygons(aoi, crs="4326")
+plot(cs10)
+
+
+
+cs_extents <- rbind(cs1, cs2, cs3, cs4,cs5, cs6,cs7, cs8,cs9, cs10)
+s <- sf::st_as_sf(cs_extents)
+s$id <- c("Osa Peninsula",
+          "Guanacaste",
+          "San Pedro",
+          "La Ceiba",
+          "Rio Platano",
+          "Indio Maiz",
+          "Limon",
+          "Manglares",
+          "Sante Fe",
+          "Darien")
+
+plot(s)
+
+st_write(s, "data/Chapter7/draft_climate_hubs.shp")
+
+
 ```
 
+
+
+
+```{r ch_1a, echo=F, message=F, warning=F}
+
+
+leaflet() %>%
+  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+  #addRasterImage(tmp, group="Raster") %>% 
+  addPolygons(data=s, fillColor = "yellow",
+               label = s$id, group="High_pa") %>% 
+  #addCircleMarkers(data=end_points_wgs, col="red", radius=1) %>% 
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satellite"),
+    overlayGroups = c("High_pa")) # %>%
+  #addPolylines(data=res_terrestrial_wgs, weight = 2, color = "black") 
+
+
+```
+
+
+```{r, include=F, message=F,warning=F}
+# Pull the statistics for each of these areas
+st_crs(s) <- 4326
+
+res_hubs <- data.frame(id=s$id, land_area=NA,lowland_pa_area=NA,upland_pa_area=NA,
+           protected_percent =NA, forest_percent=NA,
+           mangrove_area=NA, elevation_min=NA, elevation_max=NA,
+           n_corr=NA, avg_corr_length=NA, avg_corr_conductance=NA)
+
+
+i <- 1
+
+for(i in 1:nrow(s))
+{
+  
+      
+      # Start with Osa then loop
+      tmp <- s[i,]
+      #plot(tmp)
+      
+      # Land area
+      tmp_res <- st_intersection(tmp, focal_shp)
+      res_hubs$land_area[i] <- round(as.numeric(sum(st_area(tmp_res))/(1000*1000)),1)
+      
+      # Protected lowland
+      tmp_res <- st_intersection(tmp, terrestrial_pa)
+      res_hubs$lowland_pa_area[i] <- round(as.numeric(sum(st_area(tmp_res))/(1000*1000)),1)
+      
+      # Protected upland
+      high_pa <- st_make_valid(high_pa,0)
+      sf::sf_use_s2(FALSE)
+      tmp_res <- st_intersection(tmp, st_make_valid(high_pa,0))
+      res_hubs$upland_pa_area[i] <- round(as.numeric(sum(st_area(tmp_res))/(1000*1000)),1)
+      
+      # Total protected
+      all_pa <- readRDS( "data/spatial/WDPA_protected_areas/all_area_pa_shp.RDS")
+      tmp_res <- st_intersection(tmp, all_pa)
+      res_hubs$protected_percent[i] <- round((as.numeric(sum(st_area(tmp_res))/(1000*1000))/res_hubs$land_area[i])*100,1)
+      
+      # Forest cover
+      library(terra)
+      gfc_2020 <- rast("data/spatial/gfc/global_forest_change_2021_v1_9.treecover2000.tif") 
+      
+      tmp2 <- vect(as(tmp, "Spatial"))
+      test <- crop(gfc_2020, tmp2)
+      test2 <- test[test>50]
+      test3 <- test[test<=50]
+      res_hubs$forest_percent[i] <- round((nrow(test2)/(nrow(test3)+ nrow(test2)))*100,1)
+      
+      # mangroves
+      # Import mangrove layer
+      mangrove_large <- st_read("data/spatial/mangroves/mangrove_large_1kmsq.shp")
+      tmp_res <- st_intersection(tmp, mangrove_large)
+      res_hubs$mangrove_area[i] <- round(as.numeric(sum(st_area(tmp_res))/(1000*1000)),1)
+      
+      # Elevation
+      dem_crop <- rast("data/spatial/SRTM90_V4/SRTM90_V4.elevation_mask.tif")
+      test <- crop(dem_crop, tmp2)
+      res_hubs$elevation_min[i]<- minmax(test)[1]
+      res_hubs$elevation_min[i][res_hubs$elevation_min[i]<0] <- 0
+      
+      res_hubs$elevation_max[i] <- minmax(test)[2]
+      
+      # Number of corridors
+      tmp_res <- st_intersection(tmp,res_terrestrial_wgs)
+      res_hubs$n_corr[i] <- length(unique(tmp_res$ID))
+      
+      # Corridor length
+      res_hubs$avg_corr_length[i] <- round(mean(res_terrestrial_final[res_terrestrial_final$ID %in% unique(tmp_res$ID),]$length_km),1)
+      
+      # Corridor quality
+      res_hubs$avg_corr_conductance[i] <- round(mean(res_terrestrial_final[res_terrestrial_final$ID %in% unique(tmp_res$ID),]$cond_mean),1)
+
+}
+
+write.csv(res_hubs, "data/Chapter7/connectivity_hubs_summaries.csv", row.names=F)
+
+```
+
+```{r, include=F, message=F,warning=F}
+# Pull the statistics for each of these areas
+st_crs(s) <- 4326
+
+res_hubs <- data.frame(id=s$id, land_area=NA,lowland_pa_area=NA,upland_pa_area=NA,
+           protected_percent =NA, forest_percent=NA,
+           mangrove_area=NA, elevation_min=NA, elevation_max=NA,
+           n_corr=NA, avg_corr_length=NA, avg_corr_conductance=NA)
+
+
+i <- 1
+
+for(i in 1:nrow(s))
+{
+  
+      
+      # Start with Osa then loop
+      tmp <- s[i,]
+      #plot(tmp)
+      
+      # Land area
+      tmp_res <- st_intersection(tmp, focal_shp)
+      res_hubs$land_area[i] <- round(as.numeric(sum(st_area(tmp_res))/(1000*1000)),1)
+      
+      # Protected lowland
+      tmp_res <- st_intersection(tmp, terrestrial_pa)
+      res_hubs$lowland_pa_area[i] <- round(as.numeric(sum(st_area(tmp_res))/(1000*1000)),1)
+      
+      # Protected upland
+      high_pa <- st_make_valid(high_pa,0)
+      sf::sf_use_s2(FALSE)
+      tmp_res <- st_intersection(tmp, st_make_valid(high_pa,0))
+      res_hubs$upland_pa_area[i] <- round(as.numeric(sum(st_area(tmp_res))/(1000*1000)),1)
+      
+      # Total protected
+      all_pa <- readRDS( "data/spatial/WDPA_protected_areas/all_area_pa_shp.RDS")
+      tmp_res <- st_intersection(tmp, all_pa)
+      res_hubs$protected_percent[i] <- round((as.numeric(sum(st_area(tmp_res))/(1000*1000))/res_hubs$land_area[i])*100,1)
+      
+      # Forest cover
+      library(terra)
+      gfc_2020 <- rast("data/spatial/gfc/global_forest_change_2021_v1_9.treecover2000.tif") 
+      
+      tmp2 <- vect(as(tmp, "Spatial"))
+      test <- crop(gfc_2020, tmp2)
+      test2 <- test[test>50]
+      test3 <- test[test<=50]
+      res_hubs$forest_percent[i] <- round((nrow(test2)/(nrow(test3)+ nrow(test2)))*100,1)
+      
+      # mangroves
+      # Import mangrove layer
+      mangrove_large <- st_read("data/spatial/mangroves/mangrove_large_1kmsq.shp")
+      tmp_res <- st_intersection(tmp, mangrove_large)
+      res_hubs$mangrove_area[i] <- round(as.numeric(sum(st_area(tmp_res))/(1000*1000)),1)
+      
+      # Elevation
+      dem_crop <- rast("data/spatial/SRTM90_V4/SRTM90_V4.elevation_mask.tif")
+      test <- crop(dem_crop, tmp2)
+      res_hubs$elevation_min[i]<- minmax(test)[1]
+      res_hubs$elevation_min[i][res_hubs$elevation_min[i]<0] <- 0
+      
+      res_hubs$elevation_max[i] <- minmax(test)[2]
+      
+      # Number of corridors
+      tmp_res <- st_intersection(tmp,res_terrestrial_wgs)
+      res_hubs$n_corr[i] <- length(unique(tmp_res$ID))
+      
+      # Corridor length
+      res_hubs$avg_corr_length[i] <- round(mean(res_terrestrial_final[res_terrestrial_final$ID %in% unique(tmp_res$ID),]$length_km),1)
+      
+      # Corridor quality
+      res_hubs$avg_corr_conductance[i] <- round(mean(res_terrestrial_final[res_terrestrial_final$ID %in% unique(tmp_res$ID),]$cond_mean),1)
+
+}
+
+write.csv(res_hubs, "data/Chapter7/connectivity_hubs_summaries.csv", row.names=F)
+
+```
+
+
+```{r}
+X <- res_terrestrial_final[,c("length_km","cond_mean", "cond_min", "prop_protected", "prop_forest", "end_area", "start_area")]
+
+X <- stdize(X, prefix=F)
+prin_comp <- prcomp(X, rank = 2)
+
+components <- prin_comp[["x"]]
+
+components <- data.frame(components)
+
+components <- cbind(components, res_terrestrial_final$start_country)
+
+components$PC2 <- -components$PC2
+
+explained_variance <- summary(prin_comp)[["sdev"]]
+
+explained_variance <- explained_variance[1:2]
+
+comp <- prin_comp[["rotation"]]
+
+comp[,'PC2'] <- - comp[,'PC2']
+
+loadings <- comp
+
+for (i in seq(explained_variance)){
+
+  loadings[,i] <- comp[,i] * explained_variance[i]
+
+}
+
+
+features = c("length_km","cond_mean", "cond_min", "prop_protected", "prop_forest", "end_area", "start_area")
+
+
+fig <- plot_ly(components, x = ~PC1, y = ~PC2, color = ~res_terrestrial_final$start_country, colors = key$cols, type = 'scatter', mode = 'markers',
+               text=paste0("start:", res_terrestrial_final$start_pa, "   end:", res_terrestrial_final$endID),
+        hoverinfo="text") %>%
+
+  layout(
+
+    legend=list(title=list(text='color')),
+
+    plot_bgcolor = "#FFFFFF",
+
+    xaxis = list(
+
+      title = "PCA 1"),
+
+    yaxis = list(
+
+      title = "PCA 2"))
+
+
+
+#Osa
+  tmp <- s[1,]
+# Guanacaste  
+  tmp <- s[2,]
+# Darien
+  tmp <- s[10,] 
+  st_crs(tmp) <- 4326
+  tmp_res <- st_intersection(tmp,res_terrestrial_wgs)
+      
+
+
+X_sub <- components[res_terrestrial_final$ID %in% tmp_res$ID,]
+X_sub$color <- "Osa Hub Corridors"
+#fig
+fig2  <- fig %>%
+        add_trace(data = X_sub, x = ~PC1, y = ~PC2, type = "scatter",  mode = "markers", marker = list(size = 20), color=X_sub$color , colors=c("green"), text=X_sub$`res_terrestrial_final$start_country`)
+fig2
+
+#for (i in seq(length(features))){
+
+#  fig <- fig %>%
+
+#    add_segments(x = 0, xend = (loadings[i, 1])*4, y = 0, yend = (loadings[i, 2]*4), line = list(color = 'black'),inherit = FALSE, showlegend = FALSE) %>%
+
+#    add_annotations(x=(loadings[i, 1]*4), y=(loadings[i, 2]*4), ax = 0, ay = 0,text = features[i], xanchor = 'center', yanchor= 'bottom')
+
+#}
+
+fig
+```
 
 
