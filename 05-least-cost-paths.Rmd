@@ -55,7 +55,6 @@ cond_1km_stars  <- read_stars("Data/Chapter5/Low_res_resistance_surface_final.ti
 # Transform to 17N
 mangrove_17N <- st_transform(mangrove_large,31971)
 cond_1km_17N <- read_stars("Data/Chapter5/Low_res_resistance_surface_final_17N.tif")
-
 cond_1km_utm <- raster("Data/Chapter5/Low_res_resistance_surface_final_NO_NA_17N.tif")
 
 # Give the fragments a unique code
@@ -259,7 +258,7 @@ saveRDS(res_mangrove_shp, "data/Chapter3/lcp_test/mangrove_to_protected_test_shp
 ```{r ch5_3, eval=F, include=F}
 # Import coastal protected areas
 terrestrial_pa <- st_read("data/spatial/protected_areas/lowland_protected_areas.shp")
-
+#plot(terrestrial_pa)
 terrestrial_17N <- st_transform(terrestrial_pa, 31971)
 head(terrestrial_17N)
 # Simplify the dataframe 
@@ -506,8 +505,7 @@ res_terrestrial_shp <- readRDS("data/Chapter3/lcp_results/LCP_nearest_pa_res_shp
 ## DATA ADDITIONS
 
 
-# Proportion protected and contiguous protected area size
-
+# Proportion protected and contiguous protected area siz
 
 library(sf)
 focal_pa <- readRDS("data/spatial/WDPA_protected_areas/all_area_pa_shp.RDS")
@@ -1714,74 +1712,81 @@ Below we highlight the regions selected for the high resolution case studies in 
 
 ```{r ch_1b, echo=F, message=F, warning=F}
 library(terra)
-coords <- c(-84, -82.5,8.38,9.38); aoi <-  ext(coords)
-cs1 <- as.polygons(aoi, crs="4326")
-#plot(cs1)
 
-coords <- c(-86.025, -84.82711,
-           10.54061, 11.2); aoi <-  ext(coords)
-cs2 <- as.polygons(aoi, crs="4326")
-plot(cs2)
+# I made the following in qQIS using the hydbas_na_layer (scale differs depending on focal landscape)
+
+cs_extents <- st_read("data/Chapter5/connectivity_landscapes.shp")
+colnames(cs_extents)[colnames(cs_extents)=="ID"] <- "landscape_ID"
+
+# coords <- c(-84, -82.5,8.38,9.38); aoi <-  ext(coords)
+# cs1 <- as.polygons(aoi, crs="4326")
+# #plot(cs1)
+# 
+# coords <- c(-86.025, -84.82711,
+#            10.54061, 11.2); aoi <-  ext(coords)
+# cs2 <- as.polygons(aoi, crs="4326")
+# plot(cs2)
+# 
+# 
+# coords <- c(-89.215, -87.8128,
+#            14.9906, 16.2100); aoi <-  ext(coords)
+# cs3 <- as.polygons(aoi, crs="4326")
+# plot(cs3)
+# 
+# coords <- c(-87.55715, -86.1745661,
+#            15.0431, 15.8875); aoi <-  ext(coords)
+# cs4 <- as.polygons(aoi, crs="4326")
+# plot(cs4)
+# 
+# coords <- c(-86.05495, -84.548,
+#            15.1588, 16.113666); aoi <-  ext(coords)
+# cs5 <- as.polygons(aoi, crs="4326")
+# plot(cs5)
+# 
+# coords <- c(-84.516, -83.421,
+#            9.967, 11.214); aoi <-  ext(coords)
+# cs6 <- as.polygons(aoi, crs="4326")
+# plot(cs6)
+# 
+# coords <- c(-83.367, -82.289,
+#            9.022, 10.2596); aoi <-  ext(coords)
+# cs7 <- as.polygons(aoi, crs="4326")
+# plot(cs7)
+# 
+# coords <- c(-82.622,-81.566,
+#           8.4930, 9.2234); aoi <-  ext(coords)
+# cs8 <- as.polygons(aoi, crs="4326")
+# plot(cs8)
+# 
+# coords <- c(-81.363,-79.696,
+#           8.251, 9.1969); aoi <-  ext(coords)
+# cs9 <- as.polygons(aoi, crs="4326")
+# plot(cs9)
+# 
+# coords <- c(-78.74,-77.05,
+#           7.5177, 8.7677); aoi <-  ext(coords)
+# cs10 <- as.polygons(aoi, crs="4326")
+# plot(cs10)
 
 
-coords <- c(-89.215, -87.8128,
-           14.9906, 16.2100); aoi <-  ext(coords)
-cs3 <- as.polygons(aoi, crs="4326")
-plot(cs3)
 
-coords <- c(-87.55715, -86.1745661,
-           15.0431, 15.8875); aoi <-  ext(coords)
-cs4 <- as.polygons(aoi, crs="4326")
-plot(cs4)
+#cs_extents <- rbind(cs1, cs2, cs3, cs4,cs5, cs6,cs7, cs8,cs9, cs10)
+#s <- sf::st_as_sf(cs_extents)
 
-coords <- c(-86.05495, -84.548,
-           15.1588, 16.113666); aoi <-  ext(coords)
-cs5 <- as.polygons(aoi, crs="4326")
-plot(cs5)
+# s$ID <- c("Osa Peninsula",
+#           "Guanacaste",
+#           "San Pedro",
+#           "La Ceiba",
+#           "Rio Platano",
+#           "Indio Maiz",
+#           "Limon",
+#           "Manglares",
+#           "Sante Fe",
+#           "Darien")
+# 
+# plot(s)
 
-coords <- c(-84.516, -83.421,
-           9.967, 11.214); aoi <-  ext(coords)
-cs6 <- as.polygons(aoi, crs="4326")
-plot(cs6)
-
-coords <- c(-83.367, -82.289,
-           9.022, 10.2596); aoi <-  ext(coords)
-cs7 <- as.polygons(aoi, crs="4326")
-plot(cs7)
-
-coords <- c(-82.622,-81.566,
-          8.4930, 9.2234); aoi <-  ext(coords)
-cs8 <- as.polygons(aoi, crs="4326")
-plot(cs8)
-
-coords <- c(-81.363,-79.696,
-          8.251, 9.1969); aoi <-  ext(coords)
-cs9 <- as.polygons(aoi, crs="4326")
-plot(cs9)
-
-coords <- c(-78.74,-77.05,
-          7.5177, 8.7677); aoi <-  ext(coords)
-cs10 <- as.polygons(aoi, crs="4326")
-plot(cs10)
-
-
-
-cs_extents <- rbind(cs1, cs2, cs3, cs4,cs5, cs6,cs7, cs8,cs9, cs10)
-s <- sf::st_as_sf(cs_extents)
-s$id <- c("Osa Peninsula",
-          "Guanacaste",
-          "San Pedro",
-          "La Ceiba",
-          "Rio Platano",
-          "Indio Maiz",
-          "Limon",
-          "Manglares",
-          "Sante Fe",
-          "Darien")
-
-plot(s)
-
-st_write(s, "data/Chapter7/draft_climate_hubs.shp")
+st_write(cs_extents, "data/Chapter7/draft_climate_hubs.shp", append=F)
 
 
 ```
@@ -1796,8 +1801,8 @@ leaflet() %>%
   addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
   addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
   #addRasterImage(tmp, group="Raster") %>% 
-  addPolygons(data=s, fillColor = "yellow",
-               label = s$id, group="High_pa") %>% 
+  addPolygons(data=cs_extents, fillColor = "yellow",
+               label = cs_extents$landscape_ID, group="High_pa") %>% 
   #addCircleMarkers(data=end_points_wgs, col="red", radius=1) %>% 
   addLayersControl(
     baseGroups = c("OSM (default)", "Satellite"),
@@ -1810,9 +1815,8 @@ leaflet() %>%
 
 ```{r, include=F, message=F,warning=F}
 # Pull the statistics for each of these areas
-st_crs(s) <- 4326
 
-res_hubs <- data.frame(id=s$id, land_area=NA,lowland_pa_area=NA,upland_pa_area=NA,
+res_hubs <- data.frame(id=cs_extents$landscape_ID, land_area=NA,lowland_pa_area=NA,upland_pa_area=NA,
            protected_percent =NA, forest_percent=NA,
            mangrove_area=NA, elevation_min=NA, elevation_max=NA,
            n_corr=NA, avg_corr_length=NA, avg_corr_conductance=NA)
@@ -1820,12 +1824,12 @@ res_hubs <- data.frame(id=s$id, land_area=NA,lowland_pa_area=NA,upland_pa_area=N
 
 i <- 1
 
-for(i in 1:nrow(s))
+for(i in 1:nrow(cs_extents))
 {
   
       
       # Start with Osa then loop
-      tmp <- s[i,]
+      tmp <- cs_extents[i,]
       #plot(tmp)
       
       # Land area
@@ -1891,7 +1895,7 @@ write.csv(res_hubs, "data/Chapter7/connectivity_hubs_summaries.csv", row.names=F
 # Pull the statistics for each of these areas
 st_crs(s) <- 4326
 
-res_hubs <- data.frame(id=s$id, land_area=NA,lowland_pa_area=NA,upland_pa_area=NA,
+res_hubs <- data.frame(id=cs_extents$ID, land_area=NA,lowland_pa_area=NA,upland_pa_area=NA,
            protected_percent =NA, forest_percent=NA,
            mangrove_area=NA, elevation_min=NA, elevation_max=NA,
            n_corr=NA, avg_corr_length=NA, avg_corr_conductance=NA)
@@ -1904,7 +1908,7 @@ for(i in 1:nrow(s))
   
       
       # Start with Osa then loop
-      tmp <- s[i,]
+      tmp <- cs_extents[i,]
       #plot(tmp)
       
       # Land area
@@ -1952,13 +1956,13 @@ for(i in 1:nrow(s))
       
       # Number of corridors
       tmp_res <- st_intersection(tmp,res_terrestrial_wgs)
-      res_hubs$n_corr[i] <- length(unique(tmp_res$ID))
+      res_hubs$n_corr[i] <- length(unique(tmp_recs_extents$ID))
       
       # Corridor length
-      res_hubs$avg_corr_length[i] <- round(mean(res_terrestrial_final[res_terrestrial_final$ID %in% unique(tmp_res$ID),]$length_km),1)
+      res_hubs$avg_corr_length[i] <- round(mean(res_terrestrial_final[res_terrestrial_final$ID %in% unique(tmp_recs_extents$ID),]$length_km),1)
       
       # Corridor quality
-      res_hubs$avg_corr_conductance[i] <- round(mean(res_terrestrial_final[res_terrestrial_final$ID %in% unique(tmp_res$ID),]$cond_mean),1)
+      res_hubs$avg_corr_conductance[i] <- round(mean(res_terrestrial_final[res_terrestrial_final$ID %in% unique(tmp_recs_extents$ID),]$cond_mean),1)
 
 }
 
@@ -1979,7 +1983,7 @@ components <- data.frame(components)
 
 components <- cbind(components, res_terrestrial_final$start_country)
 
-components$PC2 <- -components$PC2
+componentcs_extents$PC2 <- -componentcs_extents$PC2
 
 explained_variance <- summary(prin_comp)[["sdev"]]
 
@@ -1993,7 +1997,7 @@ loadings <- comp
 
 for (i in seq(explained_variance)){
 
-  loadings[,i] <- comp[,i] * explained_variance[i]
+  loadingcs_extents[,i] <- comp[,i] * explained_variance[i]
 
 }
 
@@ -2022,17 +2026,17 @@ fig <- plot_ly(components, x = ~PC1, y = ~PC2, color = ~res_terrestrial_final$st
 
 
 #Osa
-  tmp <- s[1,]
+  tmp <- cs_extents[1,]
 # Guanacaste  
-  tmp <- s[2,]
+  tmp <- cs_extents[2,]
 # Darien
-  tmp <- s[10,] 
+  tmp <- cs_extents[10,] 
   st_crs(tmp) <- 4326
   tmp_res <- st_intersection(tmp,res_terrestrial_wgs)
       
 
 
-X_sub <- components[res_terrestrial_final$ID %in% tmp_res$ID,]
+X_sub <- componentcs_extents[res_terrestrial_final$ID %in% tmp_recs_extents$ID,]
 X_sub$color <- "Osa Hub Corridors"
 #fig
 fig2  <- fig %>%
@@ -2043,9 +2047,9 @@ fig2
 
 #  fig <- fig %>%
 
-#    add_segments(x = 0, xend = (loadings[i, 1])*4, y = 0, yend = (loadings[i, 2]*4), line = list(color = 'black'),inherit = FALSE, showlegend = FALSE) %>%
+#    add_segments(x = 0, xend = (loadingcs_extents[i, 1])*4, y = 0, yend = (loadingcs_extents[i, 2]*4), line = list(color = 'black'),inherit = FALSE, showlegend = FALSE) %>%
 
-#    add_annotations(x=(loadings[i, 1]*4), y=(loadings[i, 2]*4), ax = 0, ay = 0,text = features[i], xanchor = 'center', yanchor= 'bottom')
+#    add_annotations(x=(loadingcs_extents[i, 1]*4), y=(loadingcs_extents[i, 2]*4), ax = 0, ay = 0,text = featurecs_extents[i], xanchor = 'center', yanchor= 'bottom')
 
 #}
 

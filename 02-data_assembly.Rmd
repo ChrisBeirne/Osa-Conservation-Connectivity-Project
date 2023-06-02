@@ -503,9 +503,30 @@ focal_pa <- focal_pa[focal_pa$NAME!="Corredor Fronterizo",]
 focal_pa <- focal_pa[focal_pa$NAME!="Palo Verde",]
 focal_pa <- focal_pa[focal_pa$NAME!="Riberino Zapandi",]
 
+all_pa$NAME[substr(all_pa$NAME,1,3)=="Vol"]
+all_pa$NAME[substr(all_pa$NAME,1,3)=="Arc"]
+
+# Remove corredor fronterizo
+all_pa <- all_pa[all_pa$NAME!="Corredor Fronterizo",]
+#all_pa[focal_pa$NAME=="Corredor Fronterizo",]
+all_pa <- all_pa[all_pa$NAME!="Palo Verde",]
+all_pa <- all_pa[all_pa$NAME!="Riberino Zapandi",]
+# Remove weird island PA's
+all_pa <- all_pa[all_pa$NAME!="Volcán Maderas",]
+all_pa <- all_pa[all_pa$NAME!="Volcán Concepción",]
+all_pa <- all_pa[all_pa$NAME!="Archipiélago de Zapatera",]
+all_pa <- all_pa[all_pa$NAME!="Archipiélago de Solentiname",]
+
+all_pa <- all_pa[all_pa$NAME!="Humedal Istiam Peña Inculca",]
+
+
 saveRDS(focal_pa, "data/spatial/WDPA_protected_areas/focal_area_pa_shp.RDS")
+saveRDS(all_pa, "data/spatial/WDPA_protected_areas/all_area_pa_shp.RDS")
 
 drive_upload("data/spatial/WDPA_protected_areas/focal_area_pa_shp.RDS", as_id("https://drive.google.com/drive/u/0/folders/1KgNuMrKPyskUmroOBGISt3FxAsaBLmRv"))
+
+drive_upload("data/spatial/WDPA_protected_areas/all_area_pa_shp.RDS", as_id("https://drive.google.com/drive/u/0/folders/1KgNuMrKPyskUmroOBGISt3FxAsaBLmRv"))
+
 
 plot(st_geometry(merged_shp), col=rgb(0,0,0,0.1), border=F)
 plot(st_geometry(focal_pa[focal_pa$DESIG_TYPE=="International",]), col=met.brewer("Nizami")[1], add=T)
@@ -521,12 +542,22 @@ And and all protected areas in an interactive version:
 ```{r ch2_11b}
 #head(focal_pa)
 #table(st_geometry_type(focal_pa))
+# 
+# leaflet() %>%
+#   addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
+#   addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
+#   addPolygons(data=focal_pa[st_geometry_type(focal_pa)!="GEOMETRYCOLLECTION",], fillColor = "blue",
+#                label = focal_pa$NAME[st_geometry_type(focal_pa)!="GEOMETRYCOLLECTION"], group="Protected areas", stroke=F) %>%
+#   addLayersControl(
+#     baseGroups = c("OSM (default)", "Satellite"),
+#     overlayGroups = c("Protected areas"))
+
 
 leaflet() %>%
   addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
   addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
-  addPolygons(data=focal_pa[st_geometry_type(focal_pa)!="GEOMETRYCOLLECTION",], fillColor = "blue",
-               label = focal_pa$NAME[st_geometry_type(focal_pa)!="GEOMETRYCOLLECTION"], group="Protected areas", stroke=F) %>%
+  addPolygons(data=all_pa[st_geometry_type(all_pa)!="GEOMETRYCOLLECTION",], fillColor = "blue",
+               label = all_pa$NAME[st_geometry_type(all_pa)!="GEOMETRYCOLLECTION"], group="Protected areas", stroke=F) %>%
   addLayersControl(
     baseGroups = c("OSM (default)", "Satellite"),
     overlayGroups = c("Protected areas"))
@@ -1069,7 +1100,7 @@ low_sf <- st_as_sf(low_shp)
 #plot(st_geometry(merged_shp))
 
 # This creates polygons of the protected area strips
-low_pa <- st_intersection(focal_pa, low_sf)
+low_pa <- st_intersection(all_pa, low_sf)
 plot(st_geometry(low_pa), add=T, col="red")
 
 
@@ -1131,8 +1162,6 @@ low_focal$area <- round(as.numeric(st_area(low_focal)/(1000*1000)),1)
 
 low_final <- low_focal[low_focal$area >3,]
 
-# Remove the border park again
-low_final <- low_final[low_final$NAME!="Corredor Fronterizo",]
 
 
 leaflet() %>%
