@@ -40,9 +40,9 @@ lapply(list.of.packages, require, character.only = TRUE)
 
 # Import required data files
 
-merged_shp <- st_read("data/spatial/area_of_interest/aoi.shp")
-high_pa <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp")
-mangrove_large <- st_read("data/spatial/mangroves/mangrove_large_1kmsq.shp")
+merged_shp <- st_read("data/input/area_of_interest/aoi.shp")
+high_pa <- st_read("data/input/area_of_interest/high_elevation_pas.shp")
+mangrove_large <- st_read("data/input/mangroves/mangrove_large_1kmsq.shp")
 
 
 ```

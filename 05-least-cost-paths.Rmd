@@ -33,10 +33,10 @@ library(terra)
 
 # Import required data files
 
-merged_shp <- st_read("data/spatial/area_of_interest/aoi.shp")
-base_shp <- st_read("data/spatial/area_of_interest/base_aoi.shp")
-mangrove_large <- st_read("data/spatial/mangroves/mangrove_large_1kmsq.shp")
-high_pa <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp")
+merged_shp <- st_read("data/input/area_of_interest/aoi.shp")
+base_shp <- st_read("data/input/area_of_interest/base_aoi.shp")
+mangrove_large <- st_read("data/input/mangroves/mangrove_large_1kmsq.shp")
+high_pa <- st_read("data/input/area_of_interest/high_elevation_pas.shp")
 high_pa <- st_cast(high_pa, "POLYGON")
 #plot(st_geometry(high_pa))
 
@@ -44,16 +44,16 @@ high_pa <- st_cast(high_pa, "POLYGON")
 roi_17N <- st_transform(base_shp, crs=31971)
 
 # Read in the cost surface 
-cond_1km       <- raster("Data/Chapter5/Low_res_resistance_surface_final.tif")
-cond_1km_terra       <- rast("Data/Chapter5/Low_res_resistance_surface_final.tif")
-cond_1km_stars  <- read_stars("Data/Chapter5/Low_res_resistance_surface_final.tif")
+cond_1km       <- raster("Data/output/Chapter5/Low_res_resistance_surface_final.tif")
+cond_1km_terra       <- rast("Data/output/Chapter5/Low_res_resistance_surface_final.tif")
+cond_1km_stars  <- read_stars("Data/output/Chapter5/Low_res_resistance_surface_final.tif")
 
 #plot(cond_1km)
 
 # Transform to 17N
 mangrove_17N <- st_transform(mangrove_large,31971)
-cond_1km_17N <- read_stars("Data/Chapter5/Low_res_resistance_surface_final_17N.tif")
-cond_1km_utm <- raster("Data/Chapter5/Low_res_resistance_surface_final_NO_NA_17N.tif")
+cond_1km_17N <- read_stars("Data/output/Chapter5/Low_res_resistance_surface_final_17N.tif")
+cond_1km_utm <- raster("Data/output/Chapter5/Low_res_resistance_surface_final_NO_NA_17N.tif")
 
 # Give the fragments a unique code
 mangrove_17N$ID <- paste0("MAN",sprintf("%04d", 1:nrow(mangrove_17N)))
@@ -121,7 +121,7 @@ In total, we have a suite (n = `r nrow(end_points)`) of end points for the analy
 
 ```{r ch5_3, eval=T, include=F}
 # Import coastal protected areas
-terrestrial_pa <- st_read("data/spatial/protected_areas/lowland_protected_areas.shp")
+terrestrial_pa <- st_read("data/input/protected_areas/lowland_protected_areas.shp")
 #plot(terrestrial_pa)
 terrestrial_17N <- st_transform(terrestrial_pa, 31971)
 # Simplify the dataframe 
@@ -220,8 +220,8 @@ res_terrestrial_shp <- bind_rows(res_shp)
 
 #res_terrestrial_shp
 
-saveRDS(res_terrestrial, "data/Chapter3/lcp_test/terrestrial_to_protected.rds")
-saveRDS(res_terrestrial_shp, "data/Chapter3/lcp_test/terrestrial_to_protected_shp.rds")
+saveRDS(res_terrestrial, "data/output/Chapter3/lcp_test/terrestrial_to_protected.rds")
+saveRDS(res_terrestrial_shp, "data/output/Chapter3/lcp_test/terrestrial_to_protected_shp.rds")
 
 # Return cond_1km to NA;s
 cond_1km[cond_1km==0.00001] <- NA 
@@ -261,8 +261,8 @@ res_terrestrial_wgs <- st_transform(res_terrestrial_shp, crs=4326)
 ```{r, include=F}
 # Setup the maps
 
-res_terrestrial <- readRDS("data/Chapter3/lcp_test/terrestrial_to_protected.rds")
-res_terrestrial_shp <- readRDS("data/Chapter3/lcp_test/terrestrial_to_protected_shp.rds")
+res_terrestrial <- readRDS("data/output/Chapter3/lcp_test/terrestrial_to_protected.rds")
+res_terrestrial_shp <- readRDS("data/output/Chapter3/lcp_test/terrestrial_to_protected_shp.rds")
 
 tmp_end   <- st_transform(end_points,4326)
 tmp_pa   <- st_transform(high_pa_17N,4326)
@@ -295,15 +295,15 @@ nearest_pa_shp <- nearest_pa_shp[duplicated(nearest_pa_shp$ID)==F,]
 plot(st_geometry(roi_17N), col="lightgrey", border=F)
 plot(st_geometry(nearest_pa_shp), add=T)
 
-saveRDS(nearest_pa, "data/Chapter3/lcp_results/LCP_nearest_pa_res.rds")
-saveRDS(nearest_pa_shp, "data/Chapter3/lcp_results/LCP_nearest_pa_res_shp.rds")
+saveRDS(nearest_pa, "data/output/Chapter3/lcp_results/LCP_nearest_pa_res.rds")
+saveRDS(nearest_pa_shp, "data/output/Chapter3/lcp_results/LCP_nearest_pa_res_shp.rds")
 
 
 ```
 
 ```{r ch5_6, echo=FALSE}
-res_terrestrial <- readRDS("data/Chapter3/lcp_results/LCP_nearest_pa_res.rds")
-res_terrestrial_shp <- readRDS("data/Chapter3/lcp_results/LCP_nearest_pa_res_shp.rds")
+res_terrestrial <- readRDS("data/output/Chapter3/lcp_results/LCP_nearest_pa_res.rds")
+res_terrestrial_shp <- readRDS("data/output/Chapter3/lcp_results/LCP_nearest_pa_res_shp.rds")
 ```
 
 
@@ -312,7 +312,7 @@ res_terrestrial_shp <- readRDS("data/Chapter3/lcp_results/LCP_nearest_pa_res_shp
 # Proportion protected and contiguous protected area siz
 
 library(sf)
-focal_pa <- readRDS("data/spatial/WDPA_protected_areas/all_area_pa_shp.RDS")
+focal_pa <- readRDS("data/input/WDPA_protected_areas/all_area_pa_shp.RDS")
 #plot(st_geometry(focal_pa))
 #plot(st_geometry(focal_pa[focal_pa$DESIG_TYPE!="International",]))
 #plot(cond_1km_17N)
@@ -326,21 +326,21 @@ pa_ras <- raster(pa_ras)
 pa_ras[is.na(pa_ras)==T]<- 0
 plot(pa_ras)
 
-writeRaster(pa_ras,"data/Chapter3/lcp_results/contiguous_pa_raster.tif", overwrite=T)
-st_write(contigous_pa_area,"data/Chapter3/lcp_results/contigous_pa_area.shp", append=F)
+writeRaster(pa_ras,"data/output/Chapter3/lcp_results/contiguous_pa_raster.tif", overwrite=T)
+st_write(contigous_pa_area,"data/output/Chapter3/lcp_results/contigous_pa_area.shp", append=F)
 
 ```
 
 
 ```{r ch5_8, eval=F, echo=F}
 # Add biomass
-nasa_biomass <- read_stars("data/spatial/biomass/NASA_biomass_desnity_estimation.tif")
+nasa_biomass <- read_stars("data/input/biomass/NASA_biomass_desnity_estimation.tif")
 biomass_17N <- st_transform(nasa_biomass,31971)
 
-write_stars(biomass_17N, "data/spatial/biomass/NASA_biomass_desnity_estimation_17N.tif" )
+write_stars(biomass_17N, "data/input/biomass/NASA_biomass_desnity_estimation_17N.tif" )
 #plot(biomass_17N)
 
-#write_stars(biomass_17N, "data/spatial/biomass/NASA_biomass_desnity_estimation_17N_1km.tif" )
+#write_stars(biomass_17N, "data/input/biomass/NASA_biomass_desnity_estimation_17N_1km.tif" )
 
 ```
 
@@ -348,9 +348,9 @@ write_stars(biomass_17N, "data/spatial/biomass/NASA_biomass_desnity_estimation_1
 ```{r ch5_9, echo=F, eval=F}
 # Add proportion of forest
 
-gfc_2020 <- read_stars("data/spatial/gfc/global_forest_change_2021_v1_9.treecover2000.tif")
+gfc_2020 <- read_stars("data/input/gfc/global_forest_change_2021_v1_9.treecover2000.tif")
 gfc_17N <- st_warp(gfc_2020,cond_1km_stars)
-write_stars(gfc_17N,"data/spatial/gfc/global_forest_change_2021_v1_9.treecover2000_17N.tif")
+write_stars(gfc_17N,"data/input/gfc/global_forest_change_2021_v1_9.treecover2000_17N.tif")
 ```
 
 
@@ -360,24 +360,24 @@ write_stars(gfc_17N,"data/spatial/gfc/global_forest_change_2021_v1_9.treecover20
 res_terrestrial_17N <- st_transform(res_terrestrial_shp, 31971) 
 
 # Proportion protected
-pa_ras <- raster("data/Chapter3/lcp_results/contiguous_pa_raster.tif")
+pa_ras <- raster("data/output/Chapter3/lcp_results/contiguous_pa_raster.tif")
 plot(pa_ras)
 
 res_terrestrial$prop_protected <- NA
 
 # Average forest cover
-gfc_17N<- read_stars("data/spatial/gfc/global_forest_change_2021_v1_9.treecover2000_17N.tif")
+gfc_17N<- read_stars("data/input/gfc/global_forest_change_2021_v1_9.treecover2000_17N.tif")
 gfc_17N <- as(gfc_17N, "Raster")
 res_terrestrial$prop_forest <- NA
 
 # Cross borders?
 #Import the country shape
-focal_shp <- st_read("data/spatial/area_of_interest/all_countries_expanded.shp")
+focal_shp <- st_read("data/input/area_of_interest/all_countries_expanded.shp")
 focal_shp_17N <- st_transform(focal_shp, st_crs(res_terrestrial_17N))
 
 res_terrestrial$nCountries <- NA
 
-high_contiguous <- st_read("data/spatial/area_of_interest/high_elevation_pas_contiguous.shp")
+high_contiguous <- st_read("data/input/area_of_interest/high_elevation_pas_contiguous.shp")
 high_contiguous_utm <- st_transform(high_contiguous, crs=st_crs(end_points))
 
 contiguous_dat <- st_intersection(end_points, high_contiguous_utm)
@@ -429,7 +429,7 @@ colnames(test) <- c("start_pa","ID")
 res_terrestrial_final <- left_join(res_terrestrial_final, test)
 
 # Add starting PA contiguous area
-low_contiguous <- st_read("data/spatial/area_of_interest/low_elevation_pas_contiguous.shp")
+low_contiguous <- st_read("data/input/area_of_interest/low_elevation_pas_contiguous.shp")
 low_contiguous_utm <- st_transform(low_contiguous, crs=st_crs(end_points))
 
 low_contiguous_dat <- st_intersection(st_centroid(terrestrial_17N), low_contiguous_utm)
@@ -446,13 +446,13 @@ colnames(res_terrestrial_final)[colnames(res_terrestrial_final)=="name"] <- "sta
 
 
 # Write final datasets
-saveRDS(res_terrestrial_final, "data/Chapter3/lcp_results/terrestrial_final_results.rds")
-saveRDS(res_mangrove_final, "data/Chapter3/lcp_results/mangrove_final_results.rds")
+saveRDS(res_terrestrial_final, "data/output/Chapter3/lcp_results/terrestrial_final_results.rds")
+saveRDS(res_mangrove_final, "data/output/Chapter3/lcp_results/mangrove_final_results.rds")
 
 ```
 
 ```{r ch5_12, echo=F}
-res_terrestrial_final <- readRDS("data/Chapter3/lcp_results/terrestrial_final_results.rds")
+res_terrestrial_final <- readRDS("data/output/Chapter3/lcp_results/terrestrial_final_results.rds")
 ```
 
 ## Protected area climate corridors
@@ -487,7 +487,7 @@ leaflet() %>%
 ```
 
 ```{r, include=F, eval=F}
-st_write(tmp, "data/Chapter7/final_ter_lcps.shp", overwrite=T, append=F)
+st_write(tmp, "data/output/Chapter7/final_ter_lcps.shp", overwrite=T, append=F)
 ```
 
 
@@ -939,7 +939,7 @@ ter_finalists <- res_terrestrial_final[res_terrestrial_final$PCA1>xlow & res_ter
 Below we plot these `r nrow(ter_finalists)` climate on a map to see if we can find a subset of wider landscapes which represent tartgets for climate corridor restoration. 
 
 ```{r ch_24b, echo=F, message=F, warning=F, include=F}
-#coastal_pa  <- st_read("data/spatial/protected_areas/Coastal_protected_areas.shp")
+#coastal_pa  <- st_read("data/input/protected_areas/Coastal_protected_areas.shp")
 
 ```
 
@@ -1010,7 +1010,7 @@ leaflet() %>%
 
 
 ```{r ch_25b, echo=F, message=F, warning=F, include=F}
-st_write(ter_finalists_shp_wgs, "data/Chapter7/PA_priority.shp", append=F)
+st_write(ter_finalists_shp_wgs, "data/output/Chapter7/PA_priority.shp", append=F)
 
 ```
 
@@ -1031,10 +1031,10 @@ library(terra)
 
 # I made the following in qQIS using the hydbas_na_layer (scale differs depending on focal landscape)
 
-cs_extents <- st_read("data/Chapter5/draft_climate_hubs.shp")
+cs_extents <- st_read("data/output/Chapter5/draft_climate_hubs.shp")
 colnames(cs_extents)[colnames(cs_extents)=="ID"] <- "landscape_ID"
 
-st_write(cs_extents, "data/Chapter7/draft_climate_hubs_aoi.shp", append=F)
+st_write(cs_extents, "data/output/Chapter7/draft_climate_hubs_aoi.shp", append=F)
 
 
 ```
@@ -1060,7 +1060,7 @@ leaflet() %>%
 ```{r, include=F, message=F,warning=F}
 # Pull the statistics for each of these areas
 
-res_terrestrial_shp <- readRDS("data/Chapter3/lcp_test/terrestrial_to_protected_shp.rds")
+res_terrestrial_shp <- readRDS("data/output/Chapter3/lcp_test/terrestrial_to_protected_shp.rds")
 res_terrestrial_wgs <- st_transform(res_terrestrial_shp, crs=4326)         
 
 res_hubs <- data.frame(id=cs_extents$landscape_ID, land_area=NA,lowland_pa_area=NA,upland_pa_area=NA,
@@ -1092,13 +1092,13 @@ for(i in 1:nrow(cs_extents))
       res_hubs$upland_pa_area[i] <- round(as.numeric(sum(st_area(tmp_res))/(1000*1000)),1)
       
       # Total protected
-      all_pa <- readRDS( "data/spatial/WDPA_protected_areas/all_area_pa_shp.RDS")
+      all_pa <- readRDS( "data/input/WDPA_protected_areas/all_area_pa_shp.RDS")
       tmp_res <- st_intersection(tmp, all_pa)
       res_hubs$protected_percent[i] <- round((as.numeric(sum(st_area(tmp_res))/(1000*1000))/res_hubs$land_area[i])*100,1)
       
       # Forest cover
       library(terra)
-      gfc_2020 <- rast("data/spatial/gfc/global_forest_change_2021_v1_9.treecover2000.tif") 
+      gfc_2020 <- rast("data/input/gfc/global_forest_change_2021_v1_9.treecover2000.tif") 
       
       tmp2 <- vect(as(tmp, "Spatial"))
       test <- crop(gfc_2020, tmp2)
@@ -1108,12 +1108,12 @@ for(i in 1:nrow(cs_extents))
       
       # mangroves
       # Import mangrove layer
-      mangrove_large <- st_read("data/spatial/mangroves/mangrove_large_1kmsq.shp")
+      mangrove_large <- st_read("data/input/mangroves/mangrove_large_1kmsq.shp")
       tmp_res <- st_intersection(tmp, mangrove_large)
       res_hubs$mangrove_area[i] <- round(as.numeric(sum(st_area(tmp_res))/(1000*1000)),1)
       
       # Elevation
-      dem_crop <- rast("data/spatial/SRTM90_V4/SRTM90_V4.elevation_mask.tif")
+      dem_crop <- rast("data/input/SRTM90_V4/SRTM90_V4.elevation_mask.tif")
       test <- crop(dem_crop, tmp2)
       res_hubs$elevation_min[i]<- minmax(test)[1]
       res_hubs$elevation_min[i][res_hubs$elevation_min[i]<0] <- 0
@@ -1132,7 +1132,7 @@ for(i in 1:nrow(cs_extents))
 
 }
 
-write.csv(res_hubs, "data/Chapter7/connectivity_hubs_summaries.csv", row.names=F)
+write.csv(res_hubs, "data/output/Chapter7/connectivity_hubs_summaries.csv", row.names=F)
 
 ```
 
@@ -1148,11 +1148,11 @@ i <- 1
 
 # import data layers
 library(terra)
-gfc_2020 <- rast("data/spatial/gfc/global_forest_change_2021_v1_9.treecover2000.tif") 
+gfc_2020 <- rast("data/input/gfc/global_forest_change_2021_v1_9.treecover2000.tif") 
 high_pa <- st_make_valid(high_pa,0)    
-all_pa <- readRDS( "data/spatial/WDPA_protected_areas/all_area_pa_shp.RDS")
-mangrove_large <- st_read("data/spatial/mangroves/mangrove_large_1kmsq.shp")
-dem_crop <- rast("data/spatial/SRTM90_V4/SRTM90_V4.elevation_mask.tif")
+all_pa <- readRDS( "data/input/WDPA_protected_areas/all_area_pa_shp.RDS")
+mangrove_large <- st_read("data/input/mangroves/mangrove_large_1kmsq.shp")
+dem_crop <- rast("data/input/SRTM90_V4/SRTM90_V4.elevation_mask.tif")
        
 
 for(i in 1:nrow(cs_extents))
@@ -1214,7 +1214,7 @@ for(i in 1:nrow(cs_extents))
 
 }
 
-write.csv(res_hubs, "data/Chapter7/connectivity_hubs_summaries.csv", row.names=F)
+write.csv(res_hubs, "data/output/Chapter7/connectivity_hubs_summaries.csv", row.names=F)
 
 ```
 

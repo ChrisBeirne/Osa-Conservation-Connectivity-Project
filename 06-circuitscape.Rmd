@@ -41,20 +41,20 @@ library(raster)
 library(leaflet)
 library(terra)
 
-merged_shp <- st_read("data/spatial/area_of_interest/base_aoi.shp")
+merged_shp <- st_read("data/input/area_of_interest/base_aoi.shp")
 #plot(st_geometry(merged_shp))
 roi_17N <- st_transform(merged_shp, crs=31971)
-high_pa <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp")
+high_pa <- st_read("data/input/area_of_interest/high_elevation_pas.shp")
 high_pa_17N <- st_transform(high_pa, 31971)
 
 #plot(st_geometry(high_pa), col="green", add=T)
 
-simple_cost <- read_stars("Data/Chapter5/Low_res_resistance_surface_final.tif")
-simple_cost_terra <- rast("Data/Chapter5/Low_res_resistance_surface_final.tif")
+simple_cost <- read_stars("Data/output/Chapter5/Low_res_resistance_surface_final.tif")
+simple_cost_terra <- rast("Data/output/Chapter5/Low_res_resistance_surface_final.tif")
 # Make a new folder for the synthesis chapter 7
-dir.create("data/Chapter7")
+dir.create("data/output/Chapter7")
 
-lc_key <- read.csv("data/spatial/landcover/ESACCI-LC_S2_Prototype_ColorLegend.csv", header=T, sep=";")
+lc_key <- read.csv("data/input/landcover/ESACCI-LC_S2_Prototype_ColorLegend.csv", header=T, sep=";")
 lc_key$rgb <- rgb(lc_key$R/256,lc_key$G/256,lc_key$B/256)
 # Remove no data
 lc_key <- lc_key[1:11,]
@@ -81,7 +81,7 @@ Below is the output from this analysis across the whole survey area. The colors 
 ```{r, eval=F, echo=F, message=F, include=F}
 
 # Import start polygons
-lowland_pa <- st_read("data/spatial/protected_areas/lowland_protected_areas.shp")
+lowland_pa <- st_read("data/input/protected_areas/lowland_protected_areas.shp")
 
 leaflet() %>%
   addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
@@ -98,8 +98,8 @@ lowland_pa$land_size <- as.numeric(st_area(lowland_pa)/(1000*1000))
 
 # Transform to 17N
 start_poly_17N <- st_transform(lowland_pa, 31971)
-st_write(start_poly_17N, "Data/Chapter5/start_polygons_17N.shp", append=FALSE)
-st_write(lowland_pa, "Data/Chapter5/start_polygons.shp", append=FALSE)
+st_write(start_poly_17N, "Data/output/Chapter5/start_polygons_17N.shp", append=FALSE)
+st_write(lowland_pa, "Data/output/Chapter5/start_polygons.shp", append=FALSE)
 
 # starting parks
 leaflet() %>%
@@ -119,14 +119,14 @@ leaflet() %>%
 
 
 # Create folders to store the results
-dir.create("Data/Chapter6/lowland_pa_all_low_res/")
-path_text <- "Data/Chapter6/lowland_pa_all_low_res/"
+dir.create("Data/output/Chapter6/lowland_pa_all_low_res/")
+path_text <- "Data/output/Chapter6/lowland_pa_all_low_res/"
 
 # Import the costa layer
-simple_cost <- read_stars("Data/Chapter5/Low_res_resistance_surface_final.tif")
+simple_cost <- read_stars("Data/output/Chapter5/Low_res_resistance_surface_final.tif")
 plot(simple_cost)
 
-simple_ras <- raster("Data/Chapter5/Low_res_resistance_surface_final.tif")
+simple_ras <- raster("Data/output/Chapter5/Low_res_resistance_surface_final.tif")
 
 # Plot the resistance surface (check rivers not impassible)
 leaflet() %>%
@@ -143,7 +143,7 @@ start_point <- st_point_on_surface(lowland_pa)
 start_point_17N <- st_transform(start_point, 31971)
 
 # Read in the final destinations
-end_poly <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp")
+end_poly <- st_read("data/input/area_of_interest/high_elevation_pas.shp")
 end_poly_17N <- st_transform(end_poly, 31971)
 # Split into individual polygons
 end_poly_17N_filtered <- st_cast(end_poly_17N,"POLYGON")
@@ -161,9 +161,9 @@ nrow(end_point_17N)
 ##############
 
 tmp <- project(simple_cost_terra, crs(start_point_17N))
-writeRaster(tmp,"Data/Chapter5/Low_res_resistance_surface_final_17N.tif" , overwrite=T)
+writeRaster(tmp,"Data/output/Chapter5/Low_res_resistance_surface_final_17N.tif" , overwrite=T)
 
-cellmap <- raster("Data/Chapter5/Low_res_resistance_surface_final.tif")
+cellmap <- raster("Data/output/Chapter5/Low_res_resistance_surface_final.tif")
 NAvalue(cellmap) <- -9999
 plot(cellmap)
 writeRaster(cellmap, paste0(path_text,"/cellmap.asc"), overwrite=T)
@@ -173,10 +173,10 @@ writeRaster(cellmap, paste0(path_text,"/cellmap.asc"), overwrite=T)
 #start_blocks <- st_intersection(terrestrial_node_17N, aoi_test) 
 #start_blocks <- start_poly_17N
 
-lc <- rast("Data/Chapter5/Low_res_resistance_surface_final.tif")
-start <- vect("Data/Chapter5/start_polygons.shp")
-start_sf <- st_read("Data/Chapter5/start_polygons_17N.shp")
-end <- vect("data/spatial/area_of_interest/high_elevation_pas.shp")
+lc <- rast("Data/output/Chapter5/Low_res_resistance_surface_final.tif")
+start <- vect("Data/output/Chapter5/start_polygons.shp")
+start_sf <- st_read("Data/output/Chapter5/start_polygons_17N.shp")
+end <- vect("data/input/area_of_interest/high_elevation_pas.shp")
 
 start_sp <- as(start, "Spatial")
 start_v <- vect(start_sp)
@@ -191,7 +191,7 @@ polygons <- end_ras
 # This takes a centroid of each protected area
 start_p <- centroids(start_v, inside=T)
 
-spaced_points_17N <- st_read("Data/Chapter5/start_points_1km_spacing.shp")
+spaced_points_17N <- st_read("Data/output/Chapter5/start_points_1km_spacing.shp")
 # Convert to points
 spaced_points_17N <- st_cast(spaced_points_17N, "POINT")
 # Convert to WGS
@@ -267,13 +267,13 @@ dir.create(paste0(path_text,"/output"))
 
 ```{r, echo=F, message=F, warning=F, include=F}
 # Plot the result
-res_cur <- rast("data/Chapter6/lowland_pa_all_low_res/output/pas_lowres_curmap.asc")
+res_cur <- rast("data/output/Chapter6/lowland_pa_all_low_res/output/pas_lowres_curmap.asc")
 # GIve it the crs
 terra::crs(res_cur) <- "EPSG:4326"
 
-res_volt <- rast("data/Chapter6/lowland_pa_all_low_res/output/pas_lowres_voltmap.asc")
+res_volt <- rast("data/output/Chapter6/lowland_pa_all_low_res/output/pas_lowres_voltmap.asc")
 
-end_poly <- vect("data/spatial/area_of_interest/high_elevation_pas.shp")
+end_poly <- vect("data/input/area_of_interest/high_elevation_pas.shp")
 #end_poly_17N <- project(end_poly, "EPSG:31971")
 #plot(end_poly)
 
@@ -293,7 +293,7 @@ res_clamp <- mask(res_clamp, end_poly, inverse=T)
 pa_cond_final <- as(res_clamp, "Raster")
 
 # Reimport start and ends
-end_sf <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp")
+end_sf <- st_read("data/input/area_of_interest/high_elevation_pas.shp")
 #end_sf_17N <- st_transform(end_sf, 31971)
 # pdf("data/images/pa_cur_low.pdf",height=6.5, width=8)
 # plot(pa_cond_final)
@@ -302,7 +302,7 @@ end_sf <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp")
 # dev.off()
 
 
-writeRaster(pa_cond_final, "data/Chapter7/Conductivity_pa_high_100m_res.tif", overwrite=T)
+writeRaster(pa_cond_final, "data/output/Chapter7/Conductivity_pa_high_100m_res.tif", overwrite=T)
 ```
 
 
@@ -327,21 +327,21 @@ leaflet() %>%
    #            label = tmp_lcp$ID)# %>% 
   #addCircleMarkers(data=tmp_end, col="black", radius=1)
 
-writeRaster(pa_cond_final, "data/Chapter7/central_america_connectivity_pa_size.tiff", overwrite=T)
-writeRaster(pa_cond_final, "data/Chapter6/Climate_hub_current_and_resistance/Central_america_current.tif", overwrite=T)
+writeRaster(pa_cond_final, "data/output/Chapter7/central_america_connectivity_pa_size.tiff", overwrite=T)
+writeRaster(pa_cond_final, "data/output/Chapter6/Climate_hub_current_and_resistance/Central_america_current.tif", overwrite=T)
 
 
-lc <- rast("Data/Chapter5/Low_res_resistance_surface_final.tif")
+lc <- rast("Data/output/Chapter5/Low_res_resistance_surface_final.tif")
 
 
-writeRaster(lc, "data/Chapter6/Climate_hub_current_and_resistance/Central_america_conductance.tif", overwrite=T)
+writeRaster(lc, "data/output/Chapter6/Climate_hub_current_and_resistance/Central_america_conductance.tif", overwrite=T)
 
 ```
 
 
 ```{r, eval=F}
 # Map for board presentation
-s <- st_read("data/Chapter7/draft_climate_hubs.shp")
+s <- st_read("data/output/Chapter7/draft_climate_hubs.shp")
 
 
 leaflet() %>%
@@ -367,7 +367,7 @@ Although the above method is good to understand how the number of animals flows 
 
 ```{r, eval=T, echo=F, message=F, warning=F}
 # Normalised source
-res_cur_norm <- rast("data/Chapter6/Coastal_pa_all_low_res/output/pas_lowres_normalised_curmap.asc")
+res_cur_norm <- rast("data/output/Chapter6/Coastal_pa_all_low_res/output/pas_lowres_normalised_curmap.asc")
 #terra::crs(res_cur_norm) <- "EPSG:31971"
 
 res_clamp <- clamp(res_cur_norm, upper=0.5)
@@ -401,7 +401,7 @@ leaflet() %>%
   #addCircleMarkers(data=tmp_end, col="black", radius=1)
 
 
-writeRaster(res_cur_norm_mask, "data/Chapter7/central_america_connectivity_normalised.tiff", overwrite=T)
+writeRaster(res_cur_norm_mask, "data/output/Chapter7/central_america_connectivity_normalised.tiff", overwrite=T)
 ```
 
 
@@ -455,22 +455,22 @@ From earlier model tests we determined that we can run landscapes at 100m x 100m
 # Load data common to all locations
 
 library(terra)
-cost_final<- rast("Data/Chapter5/High_res_resistance_surface_final.tif")
+cost_final<- rast("Data/output/Chapter5/High_res_resistance_surface_final.tif")
 
 #Subset to just osa landscape xmin, x max, ymin, ymax
-hubs <- vect("data/Chapter7/draft_climate_hubs.shp")
+hubs <- vect("data/output/Chapter7/draft_climate_hubs.shp")
 
 #Start and end polygons
-start_all <- vect("data/spatial/protected_areas/lowland_protected_areas.shp")
-end_all <- vect("data/spatial/area_of_interest/high_elevation_pas.shp")
+start_all <- vect("data/input/protected_areas/lowland_protected_areas.shp")
+end_all <- vect("data/input/area_of_interest/high_elevation_pas.shp")
 
 # Start points
-start_v <- vect("Data/Chapter5/start_points_1km_spacing.shp") #17N
+start_v <- vect("Data/output/Chapter5/start_points_1km_spacing.shp") #17N
 start_v_wgs <- project(start_v, lc)
 
 
 # MAke a folder to store the final (clamped) values for sharing
-dir.create("Data/Chapter6/Climate_hub_current_and_resistance")
+dir.create("Data/output/Chapter6/Climate_hub_current_and_resistance")
 
 ```
 
@@ -501,14 +501,14 @@ leaflet() %>%
     overlayGroups = c("Cost (100m)")) 
 
 
-writeRaster(cost_final_ras, "Data/Chapter6/Case_study_1_Osa/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
-writeRaster(cost_final_ras, "Data/Chapter6/Case_study_1_Osa/cost_surface_100m.tif", overwrite=TRUE)
+writeRaster(cost_final_ras, "Data/output/Chapter6/Case_study_1_Osa/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(cost_final_ras, "Data/output/Chapter6/Case_study_1_Osa/cost_surface_100m.tif", overwrite=TRUE)
 
 ```
 
 
 ```{r, echo=F, eval=F, message=F, warning=F}
-lc <- rast("Data/Chapter6/Case_study_1_Osa/cost_surface_100m.tif")
+lc <- rast("Data/output/Chapter6/Case_study_1_Osa/cost_surface_100m.tif")
 # lets try a high res circuit scape  
 #start <- focal_pa[focal_pa$NAME=="Corcovado",]
 aoi <- ext(lc) 
@@ -542,18 +542,18 @@ grounds_ras    <- as(grounds,"Raster")
 
 
 # Write the objects
-dir.create("Data/Chapter6/Case_study_1_Osa")
+dir.create("Data/output/Chapter6/Case_study_1_Osa")
 
 # Source
-writeRaster(sources_ras, "Data/Chapter6/Case_study_1_Osa/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(sources_ras, "Data/output/Chapter6/Case_study_1_Osa/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
 # Ground
-writeRaster(grounds_ras, "Data/Chapter6/Case_study_1_Osa/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(grounds_ras, "Data/output/Chapter6/Case_study_1_Osa/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
 # Polygon
-writeRaster(polygons_ras, "Data/Chapter6/Case_study_1_Osa/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(polygons_ras, "Data/output/Chapter6/Case_study_1_Osa/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
-dir.create("Data/Chapter6/Case_study_1_Osa/output")
+dir.create("Data/output/Chapter6/Case_study_1_Osa/output")
 
 # Julia codes
 
@@ -569,10 +569,10 @@ dir.create("Data/Chapter6/Case_study_1_Osa/output")
 
 ```{r, echo=F, message=F, warning=F}
 # Import the original cost surface
-lc <- rast("Data/Chapter6/Case_study_1_Osa/cost_surface_100m.tif")
+lc <- rast("Data/output/Chapter6/Case_study_1_Osa/cost_surface_100m.tif")
 aoi <- ext(lc)
 
-res_cur <- rast("Data/Chapter6/Case_study_1_Osa/output/Case_study_1_curmap.asc")
+res_cur <- rast("Data/output/Chapter6/Case_study_1_Osa/output/Case_study_1_curmap.asc")
 
 end <- crop(end_all, aoi)
 end_sf <- sf::st_as_sf(end)
@@ -614,8 +614,8 @@ leaflet() %>%
     hideGroup("Conductance") 
 
 # Maps for sharing
-writeRaster(final_cur, "Data/Chapter6/Climate_hub_current_and_resistance/Osa_current.tif", overwrite=TRUE, NAflag=-9999)
-writeRaster(lc, "Data/Chapter6/Climate_hub_current_and_resistance/Osa_conductance.tif", overwrite=TRUE, NAflag=-9999)
+writeRaster(final_cur, "Data/output/Chapter6/Climate_hub_current_and_resistance/Osa_current.tif", overwrite=TRUE, NAflag=-9999)
+writeRaster(lc, "Data/output/Chapter6/Climate_hub_current_and_resistance/Osa_conductance.tif", overwrite=TRUE, NAflag=-9999)
 
 ```
 
@@ -653,14 +653,14 @@ leaflet() %>%
     overlayGroups = c("Cost (100m)")) 
 
 
-writeRaster(cost_final_ras, "Data/Chapter6/Case_study_2/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
-writeRaster(cost_final_ras, "Data/Chapter6/Case_study_2/cost_surface_100m.tif", overwrite=TRUE)
+writeRaster(cost_final_ras, "Data/output/Chapter6/Case_study_2/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(cost_final_ras, "Data/output/Chapter6/Case_study_2/cost_surface_100m.tif", overwrite=TRUE)
 
 ```
 
 
 ```{r, echo=F, eval=F, message=F, warning=F}
-lc <- rast("Data/Chapter6/Case_study_2/cost_surface_100m.tif")
+lc <- rast("Data/output/Chapter6/Case_study_2/cost_surface_100m.tif")
 aoi <- ext(lc) 
 
 #start_ras <- rasterize(start_v,lc_re_small, field=1)
@@ -697,18 +697,18 @@ grounds_ras    <- as(grounds,"Raster")
 
 plot(sources_ras)
 # Write the objects
-dir.create("Data/Chapter6/Case_study_2")
+dir.create("Data/output/Chapter6/Case_study_2")
 
 # Source
-writeRaster(sources_ras, "Data/Chapter6/Case_study_2/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(sources_ras, "Data/output/Chapter6/Case_study_2/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
 # Ground
-writeRaster(grounds_ras, "Data/Chapter6/Case_study_2/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(grounds_ras, "Data/output/Chapter6/Case_study_2/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
 # Polygon
-writeRaster(polygons_ras, "Data/Chapter6/Case_study_2/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(polygons_ras, "Data/output/Chapter6/Case_study_2/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
-dir.create("Data/Chapter6/Case_study_2/output")
+dir.create("Data/output/Chapter6/Case_study_2/output")
 
 # Julia codes
 
@@ -724,11 +724,11 @@ dir.create("Data/Chapter6/Case_study_2/output")
 
 ```{r, echo=F, message=F, warning=F}
 # Import the original cost surface
-lc <- rast("Data/Chapter6/Case_study_2/cost_surface_100m.tif")
+lc <- rast("Data/output/Chapter6/Case_study_2/cost_surface_100m.tif")
 aoi <- ext(lc)
 
 # Plot the result - TIME TAKEN 6454 seconds - will try with different solver
-res_cur <- rast("Data/Chapter6/Case_study_2/output/Case_study_1_curmap.asc")
+res_cur <- rast("Data/output/Chapter6/Case_study_2/output/Case_study_1_curmap.asc")
 
 end <- crop(end_all, aoi)
 end_sf <- sf::st_as_sf(end)
@@ -772,8 +772,8 @@ leaflet() %>%
 
 
 # Maps for sharing
-writeRaster(final_cur, "Data/Chapter6/Climate_hub_current_and_resistance/Guanacaste_current.tif", overwrite=TRUE, NAflag=-9999)
-writeRaster(lc, "Data/Chapter6/Climate_hub_current_and_resistance/Guanacaste_conductance.tif", overwrite=TRUE, NAflag=-9999)
+writeRaster(final_cur, "Data/output/Chapter6/Climate_hub_current_and_resistance/Guanacaste_current.tif", overwrite=TRUE, NAflag=-9999)
+writeRaster(lc, "Data/output/Chapter6/Climate_hub_current_and_resistance/Guanacaste_conductance.tif", overwrite=TRUE, NAflag=-9999)
 
 ```
 
@@ -803,15 +803,15 @@ leaflet() %>%
     overlayGroups = c("Cost (100m)")) 
 
 
-writeRaster(cost_final_ras, "Data/Chapter6/Case_study_3/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
-writeRaster(cost_final_ras, "Data/Chapter6/Case_study_3/cost_surface_100m.tif", overwrite=TRUE)
-writeRaster(cost_final_ras_low, "Data/Chapter6/Case_study_3/cost_surface_300m.tif", overwrite=TRUE)
+writeRaster(cost_final_ras, "Data/output/Chapter6/Case_study_3/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(cost_final_ras, "Data/output/Chapter6/Case_study_3/cost_surface_100m.tif", overwrite=TRUE)
+writeRaster(cost_final_ras_low, "Data/output/Chapter6/Case_study_3/cost_surface_300m.tif", overwrite=TRUE)
 
 ```
 
 
 ```{r, echo=F, eval=F, message=F, warning=F}
-lc <- rast("Data/Chapter6/Case_study_3/cost_surface_100m.tif")
+lc <- rast("Data/output/Chapter6/Case_study_3/cost_surface_100m.tif")
 aoi <- ext(lc) 
 
 #start_ras <- rasterize(start_v,lc_re_small, field=1)
@@ -850,18 +850,18 @@ grounds_ras    <- as(grounds,"Raster")
 #plot(polygons_ras,add=T)
 
 # Write the objects
-dir.create("Data/Chapter6/Case_study_3")
+dir.create("Data/output/Chapter6/Case_study_3")
 
 # Source
-writeRaster(sources_ras, "Data/Chapter6/Case_study_3/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(sources_ras, "Data/output/Chapter6/Case_study_3/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
 # Ground
-writeRaster(grounds_ras, "Data/Chapter6/Case_study_3/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(grounds_ras, "Data/output/Chapter6/Case_study_3/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
 # Polygon
-writeRaster(polygons_ras, "Data/Chapter6/Case_study_3/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(polygons_ras, "Data/output/Chapter6/Case_study_3/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
-dir.create("Data/Chapter6/Case_study_3/output")
+dir.create("Data/output/Chapter6/Case_study_3/output")
 
 # Julia codes
 
@@ -877,13 +877,13 @@ dir.create("Data/Chapter6/Case_study_3/output")
 
 ```{r, echo=F, message=F, warning=F}
 # Import the original cost surface
-lc <- rast("Data/Chapter6/Case_study_3/cost_surface_100m.tif")
-lc_low <- rast("Data/Chapter6/Case_study_3/cost_surface_300m.tif")
+lc <- rast("Data/output/Chapter6/Case_study_3/cost_surface_100m.tif")
+lc_low <- rast("Data/output/Chapter6/Case_study_3/cost_surface_300m.tif")
 
 aoi <- ext(lc)
 
 # Plot the result - TIME TAKEN 6454 seconds - will try with different solver
-res_cur <- rast("Data/Chapter6/Case_study_3/output/Case_study_3_curmap.asc")
+res_cur <- rast("Data/output/Chapter6/Case_study_3/output/Case_study_3_curmap.asc")
 
 end <- crop(end_all, aoi)
 end_sf <- sf::st_as_sf(end)
@@ -934,8 +934,8 @@ leaflet() %>%
 
 
 # Maps for sharing
-writeRaster(final_cur, "Data/Chapter6/Climate_hub_current_and_resistance/SelvaMaya_current.tif", overwrite=TRUE, NAflag=-9999)
-writeRaster(lc, "Data/Chapter6/Climate_hub_current_and_resistance/SelvaMaya_conductance.tif", overwrite=TRUE, NAflag=-9999)
+writeRaster(final_cur, "Data/output/Chapter6/Climate_hub_current_and_resistance/SelvaMaya_current.tif", overwrite=TRUE, NAflag=-9999)
+writeRaster(lc, "Data/output/Chapter6/Climate_hub_current_and_resistance/SelvaMaya_conductance.tif", overwrite=TRUE, NAflag=-9999)
 
 ```
 
@@ -963,15 +963,15 @@ leaflet() %>%
     overlayGroups = c("Cost (100m)")) 
 
 
-writeRaster(cost_final_ras, "Data/Chapter6/Case_study_4/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
-writeRaster(cost_final_ras, "Data/Chapter6/Case_study_4/cost_surface_100m.tif", overwrite=TRUE)
-writeRaster(cost_final_ras_low, "Data/Chapter6/Case_study_4/cost_surface_300m.tif", overwrite=TRUE)
+writeRaster(cost_final_ras, "Data/output/Chapter6/Case_study_4/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(cost_final_ras, "Data/output/Chapter6/Case_study_4/cost_surface_100m.tif", overwrite=TRUE)
+writeRaster(cost_final_ras_low, "Data/output/Chapter6/Case_study_4/cost_surface_300m.tif", overwrite=TRUE)
 
 ```
 
 
 ```{r, echo=F, eval=F, message=F, warning=F}
-lc <- rast("Data/Chapter6/Case_study_4/cost_surface_100m.tif")
+lc <- rast("Data/output/Chapter6/Case_study_4/cost_surface_100m.tif")
 aoi <- ext(lc) 
 
 #start_ras <- rasterize(start_v,lc_re_small, field=1)
@@ -1007,18 +1007,18 @@ grounds_ras    <- as(grounds,"Raster")
 
 plot(sources_ras)
 # Write the objects
-dir.create("Data/Chapter6/Case_study_4")
+dir.create("Data/output/Chapter6/Case_study_4")
 
 # Source
-writeRaster(sources_ras, "Data/Chapter6/Case_study_4/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(sources_ras, "Data/output/Chapter6/Case_study_4/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
 # Ground
-writeRaster(grounds_ras, "Data/Chapter6/Case_study_4/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(grounds_ras, "Data/output/Chapter6/Case_study_4/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
 # Polygon
-writeRaster(polygons_ras, "Data/Chapter6/Case_study_4/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(polygons_ras, "Data/output/Chapter6/Case_study_4/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
-dir.create("Data/Chapter6/Case_study_4/output")
+dir.create("Data/output/Chapter6/Case_study_4/output")
 
 # Julia codes
 
@@ -1034,11 +1034,11 @@ dir.create("Data/Chapter6/Case_study_4/output")
 
 ```{r, echo=F, message=F, warning=F}
 # Import the original cost surface
-lc <- rast("Data/Chapter6/Case_study_4/cost_surface_300m.tif")
+lc <- rast("Data/output/Chapter6/Case_study_4/cost_surface_300m.tif")
 aoi <- ext(lc)
 
 # Plot the result - TIME TAKEN 6454 seconds - will try with different solver
-res_cur <- rast("Data/Chapter6/Case_study_4/output/Case_study_4_curmap.asc")
+res_cur <- rast("Data/output/Chapter6/Case_study_4/output/Case_study_4_curmap.asc")
 
 end <- crop(end_all, aoi)
 end_sf <- sf::st_as_sf(end)
@@ -1087,8 +1087,8 @@ leaflet() %>%
 
 
 # Maps for sharing
-writeRaster(final_cur, "Data/Chapter6/Climate_hub_current_and_resistance/Belize_current.tif", overwrite=TRUE, NAflag=-9999)
-writeRaster(lc, "Data/Chapter6/Climate_hub_current_and_resistance/Belize_conductance.tif", overwrite=TRUE, NAflag=-9999)
+writeRaster(final_cur, "Data/output/Chapter6/Climate_hub_current_and_resistance/Belize_current.tif", overwrite=TRUE, NAflag=-9999)
+writeRaster(lc, "Data/output/Chapter6/Climate_hub_current_and_resistance/Belize_conductance.tif", overwrite=TRUE, NAflag=-9999)
 
 
 ```
@@ -1118,15 +1118,15 @@ leaflet() %>%
     overlayGroups = c("Cost (100m)")) 
 
 
-writeRaster(cost_final_ras, "Data/Chapter6/Case_study_5/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
-writeRaster(cost_final_ras, "Data/Chapter6/Case_study_5/cost_surface_100m.tif", overwrite=TRUE)
-writeRaster(cost_final_ras_low, "Data/Chapter6/Case_study_5/cost_surface_300m.tif", overwrite=TRUE)
+writeRaster(cost_final_ras, "Data/output/Chapter6/Case_study_5/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(cost_final_ras, "Data/output/Chapter6/Case_study_5/cost_surface_100m.tif", overwrite=TRUE)
+writeRaster(cost_final_ras_low, "Data/output/Chapter6/Case_study_5/cost_surface_300m.tif", overwrite=TRUE)
 
 ```
 
 
 ```{r, echo=F, eval=F, message=F, warning=F}
-lc <- rast("Data/Chapter6/Case_study_5/cost_surface_100m.tif")
+lc <- rast("Data/output/Chapter6/Case_study_5/cost_surface_100m.tif")
 aoi <- ext(lc) 
 
 #start_ras <- rasterize(start_v,lc_re_small, field=1)
@@ -1169,18 +1169,18 @@ plot(polygons_ras)
 plot(grounds_ras)
 
 # Write the objects
-dir.create("Data/Chapter6/Case_study_5")
+dir.create("Data/output/Chapter6/Case_study_5")
 
 # Source
-writeRaster(sources_ras, "Data/Chapter6/Case_study_5/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(sources_ras, "Data/output/Chapter6/Case_study_5/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
 # Ground
-writeRaster(grounds_ras, "Data/Chapter6/Case_study_5/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(grounds_ras, "Data/output/Chapter6/Case_study_5/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
 # Polygon
-writeRaster(polygons_ras, "Data/Chapter6/Case_study_5/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(polygons_ras, "Data/output/Chapter6/Case_study_5/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
-dir.create("Data/Chapter6/Case_study_5/output")
+dir.create("Data/output/Chapter6/Case_study_5/output")
 
 # Julia codes
 
@@ -1192,11 +1192,11 @@ dir.create("Data/Chapter6/Case_study_5/output")
 
 ```{r, echo=F, message=F, warning=F}
 # Import the original cost surface
-lc <- rast("Data/Chapter6/Case_study_5/cost_surface_300m.tif")
+lc <- rast("Data/output/Chapter6/Case_study_5/cost_surface_300m.tif")
 aoi <- ext(lc)
 
 # Plot the result - TIME TAKEN 6454 seconds - will try with different solver
-res_cur <- rast("Data/Chapter6/Case_study_5/output/Case_study_5_curmap.asc")
+res_cur <- rast("Data/output/Chapter6/Case_study_5/output/Case_study_5_curmap.asc")
 
 end <- crop(end_all, aoi)
 end_sf <- sf::st_as_sf(end)
@@ -1246,8 +1246,8 @@ leaflet() %>%
 
 
 # Maps for sharing
-writeRaster(final_cur, "Data/Chapter6/Climate_hub_current_and_resistance/Mostikia_current.tif", overwrite=TRUE, NAflag=-9999)
-writeRaster(lc, "Data/Chapter6/Climate_hub_current_and_resistance/Mostikia_conductance.tif", overwrite=TRUE, NAflag=-9999)
+writeRaster(final_cur, "Data/output/Chapter6/Climate_hub_current_and_resistance/Mostikia_current.tif", overwrite=TRUE, NAflag=-9999)
+writeRaster(lc, "Data/output/Chapter6/Climate_hub_current_and_resistance/Mostikia_conductance.tif", overwrite=TRUE, NAflag=-9999)
 
 
 ```
@@ -1279,15 +1279,15 @@ leaflet() %>%
     overlayGroups = c("Cost (100m)")) 
 
 
-writeRaster(cost_final_ras, "Data/Chapter6/Case_study_6/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
-writeRaster(cost_final_ras, "Data/Chapter6/Case_study_6/cost_surface_100m.tif", overwrite=TRUE)
-writeRaster(cost_final_ras_low, "Data/Chapter6/Case_study_6/cost_surface_200m.tif", overwrite=TRUE)
+writeRaster(cost_final_ras, "Data/output/Chapter6/Case_study_6/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(cost_final_ras, "Data/output/Chapter6/Case_study_6/cost_surface_100m.tif", overwrite=TRUE)
+writeRaster(cost_final_ras_low, "Data/output/Chapter6/Case_study_6/cost_surface_200m.tif", overwrite=TRUE)
 
 ```
 
 
 ```{r, echo=F, eval=F, message=F, warning=F}
-lc <- rast("Data/Chapter6/Case_study_6/cost_surface_100m.tif")
+lc <- rast("Data/output/Chapter6/Case_study_6/cost_surface_100m.tif")
 aoi <- ext(lc) 
 
 #start_ras <- rasterize(start_v,lc_re_small, field=1)
@@ -1329,18 +1329,18 @@ plot(polygons_ras)
 plot(grounds_ras)
 
 # Write the objects
-dir.create("Data/Chapter6/Case_study_6")
+dir.create("Data/output/Chapter6/Case_study_6")
 
 # Source
-writeRaster(sources_ras, "Data/Chapter6/Case_study_6/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(sources_ras, "Data/output/Chapter6/Case_study_6/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
 # Ground
-writeRaster(grounds_ras, "Data/Chapter6/Case_study_6/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(grounds_ras, "Data/output/Chapter6/Case_study_6/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
 # Polygon
-writeRaster(polygons_ras, "Data/Chapter6/Case_study_6/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(polygons_ras, "Data/output/Chapter6/Case_study_6/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
-dir.create("Data/Chapter6/Case_study_6/output")
+dir.create("Data/output/Chapter6/Case_study_6/output")
 
 # Julia codes
 
@@ -1352,11 +1352,11 @@ dir.create("Data/Chapter6/Case_study_6/output")
 
 ```{r, echo=F, message=F, warning=F}
 # Import the original cost surface
-lc <- rast("Data/Chapter6/Case_study_6/cost_surface_200m.tif")
+lc <- rast("Data/output/Chapter6/Case_study_6/cost_surface_200m.tif")
 aoi <- ext(lc)
 
 # Plot the result - TIME TAKEN 6454 seconds - will try with different solver
-res_cur <- rast("Data/Chapter6/Case_study_6/output/Case_study_6_curmap.asc")
+res_cur <- rast("Data/output/Chapter6/Case_study_6/output/Case_study_6_curmap.asc")
   
 end <- crop(end_all, aoi)
 end_sf <- sf::st_as_sf(end)
@@ -1405,8 +1405,8 @@ leaflet() %>%
     hideGroup("Conductance") 
 
 # Maps for sharing
-writeRaster(final_cur, "Data/Chapter6/Climate_hub_current_and_resistance/IndioMaiz_current.tif", overwrite=TRUE, NAflag=-9999)
-writeRaster(lc, "Data/Chapter6/Climate_hub_current_and_resistance/IndioMaiz.tif", overwrite=TRUE, NAflag=-9999)
+writeRaster(final_cur, "Data/output/Chapter6/Climate_hub_current_and_resistance/IndioMaiz_current.tif", overwrite=TRUE, NAflag=-9999)
+writeRaster(lc, "Data/output/Chapter6/Climate_hub_current_and_resistance/IndioMaiz.tif", overwrite=TRUE, NAflag=-9999)
 
 
 ```
@@ -1437,15 +1437,15 @@ leaflet() %>%
     overlayGroups = c("Cost (100m)")) 
 
 
-writeRaster(cost_final_ras, "Data/Chapter6/Case_study_7/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
-writeRaster(cost_final_ras, "Data/Chapter6/Case_study_7/cost_surface_100m.tif", overwrite=TRUE)
-#writeRaster(cost_final_ras_low, "Data/Chapter6/Case_study_7/cost_surface_200m.tif", overwrite=TRUE)
+writeRaster(cost_final_ras, "Data/output/Chapter6/Case_study_7/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(cost_final_ras, "Data/output/Chapter6/Case_study_7/cost_surface_100m.tif", overwrite=TRUE)
+#writeRaster(cost_final_ras_low, "Data/output/Chapter6/Case_study_7/cost_surface_200m.tif", overwrite=TRUE)
 
 ```
 
 
 ```{r, echo=F, eval=F, message=F, warning=F}
-lc <- rast("Data/Chapter6/Case_study_7/cost_surface_100m.tif")
+lc <- rast("Data/output/Chapter6/Case_study_7/cost_surface_100m.tif")
 aoi <- ext(lc) 
 
 #start_ras <- rasterize(start_v,lc_re_small, field=1)
@@ -1487,18 +1487,18 @@ plot(polygons_ras)
 plot(grounds_ras)
 
 # Write the objects
-dir.create("Data/Chapter6/Case_study_7")
+dir.create("Data/output/Chapter6/Case_study_7")
 
 # Source
-writeRaster(sources_ras, "Data/Chapter6/Case_study_7/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(sources_ras, "Data/output/Chapter6/Case_study_7/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
 # Ground
-writeRaster(grounds_ras, "Data/Chapter6/Case_study_7/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(grounds_ras, "Data/output/Chapter6/Case_study_7/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
 # Polygon
-writeRaster(polygons_ras, "Data/Chapter6/Case_study_7/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(polygons_ras, "Data/output/Chapter6/Case_study_7/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
-dir.create("Data/Chapter6/Case_study_7/output")
+dir.create("Data/output/Chapter6/Case_study_7/output")
 
 # Julia codes
 
@@ -1510,11 +1510,11 @@ dir.create("Data/Chapter6/Case_study_7/output")
 
 ```{r, echo=F, message=F, warning=F}
 # Import the original cost surface
-lc <- rast("Data/Chapter6/Case_study_7/cost_surface_100m.tif")
+lc <- rast("Data/output/Chapter6/Case_study_7/cost_surface_100m.tif")
 aoi <- ext(lc)
 
 # Plot the result - TIME TAKEN 6454 seconds - will try with different solver
-res_cur <- rast("Data/Chapter6/Case_study_7/output/Case_study_7_curmap.asc")
+res_cur <- rast("Data/output/Chapter6/Case_study_7/output/Case_study_7_curmap.asc")
   
 end <- crop(end_all, aoi)
 end_sf <- sf::st_as_sf(end)
@@ -1563,8 +1563,8 @@ leaflet() %>%
     hideGroup("Conductance") 
 
 # Maps for sharing
-writeRaster(final_cur, "Data/Chapter6/Climate_hub_current_and_resistance/Amistad_current.tif", overwrite=TRUE, NAflag=-9999)
-writeRaster(lc, "Data/Chapter6/Climate_hub_current_and_resistance/Amistad_conductance.tif", overwrite=TRUE, NAflag=-9999)
+writeRaster(final_cur, "Data/output/Chapter6/Climate_hub_current_and_resistance/Amistad_current.tif", overwrite=TRUE, NAflag=-9999)
+writeRaster(lc, "Data/output/Chapter6/Climate_hub_current_and_resistance/Amistad_conductance.tif", overwrite=TRUE, NAflag=-9999)
 
 
 ```
@@ -1595,15 +1595,15 @@ leaflet() %>%
     overlayGroups = c("Cost (100m)")) 
 
 
-writeRaster(cost_final_ras, "Data/Chapter6/Case_study_8/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
-writeRaster(cost_final_ras, "Data/Chapter6/Case_study_8/cost_surface_100m.tif", overwrite=TRUE)
-writeRaster(cost_final_ras_low, "Data/Chapter6/Case_study_8/cost_surface_200m.tif", overwrite=TRUE)
+writeRaster(cost_final_ras, "Data/output/Chapter6/Case_study_8/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(cost_final_ras, "Data/output/Chapter6/Case_study_8/cost_surface_100m.tif", overwrite=TRUE)
+writeRaster(cost_final_ras_low, "Data/output/Chapter6/Case_study_8/cost_surface_200m.tif", overwrite=TRUE)
 
 ```
 
 
 ```{r, echo=F, eval=F, message=F, warning=F}
-lc <- rast("Data/Chapter6/Case_study_8/cost_surface_100m.tif")
+lc <- rast("Data/output/Chapter6/Case_study_8/cost_surface_100m.tif")
 aoi <- ext(lc) 
 
 #start_ras <- rasterize(start_v,lc_re_small, field=1)
@@ -1645,18 +1645,18 @@ plot(polygons_ras)
 plot(grounds_ras)
 
 # Write the objects
-dir.create("Data/Chapter6/Case_study_8")
+dir.create("Data/output/Chapter6/Case_study_8")
 
 # Source
-writeRaster(sources_ras, "Data/Chapter6/Case_study_8/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(sources_ras, "Data/output/Chapter6/Case_study_8/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
 # Ground
-writeRaster(grounds_ras, "Data/Chapter6/Case_study_8/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(grounds_ras, "Data/output/Chapter6/Case_study_8/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
 # Polygon
-writeRaster(polygons_ras, "Data/Chapter6/Case_study_8/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(polygons_ras, "Data/output/Chapter6/Case_study_8/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
-dir.create("Data/Chapter6/Case_study_8/output")
+dir.create("Data/output/Chapter6/Case_study_8/output")
 
 # Julia codes
 
@@ -1668,11 +1668,11 @@ dir.create("Data/Chapter6/Case_study_8/output")
 
 ```{r, echo=F, message=F, warning=F}
 # Import the original cost surface
-lc <- rast("Data/Chapter6/Case_study_8/cost_surface_200m.tif")
+lc <- rast("Data/output/Chapter6/Case_study_8/cost_surface_200m.tif")
 aoi <- ext(lc)
 
 # Plot the result - TIME TAKEN 6454 seconds - will try with different solver
-res_cur <- rast("Data/Chapter6/Case_study_8/output/Case_study_8_curmap.asc")
+res_cur <- rast("Data/output/Chapter6/Case_study_8/output/Case_study_8_curmap.asc")
   
 end <- crop(end_all, aoi)
 end_sf <- sf::st_as_sf(end)
@@ -1722,8 +1722,8 @@ leaflet() %>%
 
 
 # Maps for sharing
-writeRaster(final_cur, "Data/Chapter6/Climate_hub_current_and_resistance/Darien_current.tif", overwrite=TRUE, NAflag=-9999)
-writeRaster(lc, "Data/Chapter6/Climate_hub_current_and_resistance/Darien_conductance.tif", overwrite=TRUE, NAflag=-9999)
+writeRaster(final_cur, "Data/output/Chapter6/Climate_hub_current_and_resistance/Darien_current.tif", overwrite=TRUE, NAflag=-9999)
+writeRaster(lc, "Data/output/Chapter6/Climate_hub_current_and_resistance/Darien_conductance.tif", overwrite=TRUE, NAflag=-9999)
 
 
 
@@ -1754,15 +1754,15 @@ leaflet() %>%
     overlayGroups = c("Cost (100m)")) 
 
 
-writeRaster(cost_final_ras, "Data/Chapter6/Case_study_9/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
-writeRaster(cost_final_ras, "Data/Chapter6/Case_study_9/cost_surface_100m.tif", overwrite=TRUE)
-writeRaster(cost_final_ras_low, "Data/Chapter6/Case_study_9/cost_surface_200m.tif", overwrite=TRUE)
+writeRaster(cost_final_ras, "Data/output/Chapter6/Case_study_9/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(cost_final_ras, "Data/output/Chapter6/Case_study_9/cost_surface_100m.tif", overwrite=TRUE)
+writeRaster(cost_final_ras_low, "Data/output/Chapter6/Case_study_9/cost_surface_200m.tif", overwrite=TRUE)
 
 ```
 
 
 ```{r, echo=F, eval=F, message=F, warning=F}
-lc <- rast("Data/Chapter6/Case_study_9/cost_surface_100m.tif")
+lc <- rast("Data/output/Chapter6/Case_study_9/cost_surface_100m.tif")
 aoi <- ext(lc) 
 
 #start_ras <- rasterize(start_v,lc_re_small, field=1)
@@ -1804,18 +1804,18 @@ plot(polygons_ras)
 plot(grounds_ras)
 
 # Write the objects
-dir.create("Data/Chapter6/Case_study_9")
+dir.create("Data/output/Chapter6/Case_study_9")
 
 # Source
-writeRaster(sources_ras, "Data/Chapter6/Case_study_9/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(sources_ras, "Data/output/Chapter6/Case_study_9/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
 # Ground
-writeRaster(grounds_ras, "Data/Chapter6/Case_study_9/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(grounds_ras, "Data/output/Chapter6/Case_study_9/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
 # Polygon
-writeRaster(polygons_ras, "Data/Chapter6/Case_study_9/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(polygons_ras, "Data/output/Chapter6/Case_study_9/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
-dir.create("Data/Chapter6/Case_study_9/output")
+dir.create("Data/output/Chapter6/Case_study_9/output")
 
 # Julia codes
 
@@ -1827,11 +1827,11 @@ dir.create("Data/Chapter6/Case_study_9/output")
 
 ```{r, echo=F, message=F, warning=F}
 # Import the original cost surface
-lc <- rast("Data/Chapter6/Case_study_9/cost_surface_200m.tif")
+lc <- rast("Data/output/Chapter6/Case_study_9/cost_surface_200m.tif")
 aoi <- ext(lc)
 
 # Plot the result - TIME TAKEN 6454 seconds - will try with different solver
-res_cur <- rast("Data/Chapter6/Case_study_9/output/Case_study_9_curmap.asc")
+res_cur <- rast("Data/output/Chapter6/Case_study_9/output/Case_study_9_curmap.asc")
   
 end <- crop(end_all, aoi)
 end_sf <- sf::st_as_sf(end)
@@ -1881,8 +1881,8 @@ leaflet() %>%
 
 
 # Maps for sharing
-writeRaster(final_cur, "Data/Chapter6/Climate_hub_current_and_resistance/ElSalvador_current.tif", overwrite=TRUE, NAflag=-9999)
-writeRaster(lc, "Data/Chapter6/Climate_hub_current_and_resistance/ElSalvador_conductance.tif", overwrite=TRUE, NAflag=-9999)
+writeRaster(final_cur, "Data/output/Chapter6/Climate_hub_current_and_resistance/ElSalvador_current.tif", overwrite=TRUE, NAflag=-9999)
+writeRaster(lc, "Data/output/Chapter6/Climate_hub_current_and_resistance/ElSalvador_conductance.tif", overwrite=TRUE, NAflag=-9999)
 
 
 
@@ -1914,15 +1914,15 @@ leaflet() %>%
     overlayGroups = c("Cost (100m)")) 
 
 
-writeRaster(cost_final_ras, "Data/Chapter6/Case_study_10/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
-writeRaster(cost_final_ras, "Data/Chapter6/Case_study_10/cost_surface_100m.tif", overwrite=TRUE)
-writeRaster(cost_final_ras_low, "Data/Chapter6/Case_study_10/cost_surface_200m.tif", overwrite=TRUE)
+writeRaster(cost_final_ras, "Data/output/Chapter6/Case_study_10/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(cost_final_ras, "Data/output/Chapter6/Case_study_10/cost_surface_100m.tif", overwrite=TRUE)
+writeRaster(cost_final_ras_low, "Data/output/Chapter6/Case_study_10/cost_surface_200m.tif", overwrite=TRUE)
 
 ```
 
 
 ```{r, echo=F, eval=F, message=F, warning=F}
-lc <- rast("Data/Chapter6/Case_study_10/cost_surface_100m.tif")
+lc <- rast("Data/output/Chapter6/Case_study_10/cost_surface_100m.tif")
 aoi <- ext(lc) 
 
 #start_ras <- rasterize(start_v,lc_re_small, field=1)
@@ -1964,18 +1964,18 @@ plot(polygons_ras)
 plot(grounds_ras)
 
 # Write the objects
-dir.create("Data/Chapter6/Case_study_10")
+dir.create("Data/output/Chapter6/Case_study_10")
 
 # Source
-writeRaster(sources_ras, "Data/Chapter6/Case_study_10/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(sources_ras, "Data/output/Chapter6/Case_study_10/sources.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
 # Ground
-writeRaster(grounds_ras, "Data/Chapter6/Case_study_10/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(grounds_ras, "Data/output/Chapter6/Case_study_10/grounds.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
 # Polygon
-writeRaster(polygons_ras, "Data/Chapter6/Case_study_10/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(polygons_ras, "Data/output/Chapter6/Case_study_10/regions_grid.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
-dir.create("Data/Chapter6/Case_study_10/output")
+dir.create("Data/output/Chapter6/Case_study_10/output")
 
 # Julia codes
 
@@ -1987,11 +1987,11 @@ dir.create("Data/Chapter6/Case_study_10/output")
 
 ```{r, echo=F, message=F, warning=F}
 # Import the original cost surface
-lc <- rast("Data/Chapter6/Case_study_10/cost_surface_200m.tif")
+lc <- rast("Data/output/Chapter6/Case_study_10/cost_surface_200m.tif")
 aoi <- ext(lc)
 
 # Plot the result - TIME TAKEN 6454 seconds - will try with different solver
-res_cur <- rast("Data/Chapter6/Case_study_10/output/Case_study_10_curmap.asc")
+res_cur <- rast("Data/output/Chapter6/Case_study_10/output/Case_study_10_curmap.asc")
   
 end <- crop(end_all, aoi)
 end_sf <- sf::st_as_sf(end)
@@ -2041,8 +2041,8 @@ leaflet() %>%
 
 
 # Maps for sharing
-writeRaster(final_cur, "Data/Chapter6/Climate_hub_current_and_resistance/HondurasVolcan_current.tif", overwrite=TRUE, NAflag=-9999)
-writeRaster(lc, "Data/Chapter6/Climate_hub_current_and_resistance/HondurasVolcan_conductance.tif", overwrite=TRUE, NAflag=-9999)
+writeRaster(final_cur, "Data/output/Chapter6/Climate_hub_current_and_resistance/HondurasVolcan_current.tif", overwrite=TRUE, NAflag=-9999)
+writeRaster(lc, "Data/output/Chapter6/Climate_hub_current_and_resistance/HondurasVolcan_conductance.tif", overwrite=TRUE, NAflag=-9999)
 
 
 
@@ -2071,13 +2071,13 @@ writeRaster(lc, "Data/Chapter6/Climate_hub_current_and_resistance/HondurasVolcan
 
 # Here i just need the protected area fragments
 # Create folders to store the results
-dir.create("Data/Chapter6/High_connectivity_low_res")
-path_text <- "Data/Chapter6/High_connectivity_low_res"
+dir.create("Data/output/Chapter6/High_connectivity_low_res")
+path_text <- "Data/output/Chapter6/High_connectivity_low_res"
 
 # read them back in with the raster package
-end_polygons <- raster("Data/Chapter6/Coastal_pa_all_low_res/end_poly_stars.tif")
-grounds_polygons <- raster("Data/Chapter6/Coastal_pa_all_low_res/grounds_stars.tif")
-cellmap <- raster("Data/Chapter5/Low_res_resistance_surface.tif")
+end_polygons <- raster("Data/output/Chapter6/Coastal_pa_all_low_res/end_poly_stars.tif")
+grounds_polygons <- raster("Data/output/Chapter6/Coastal_pa_all_low_res/grounds_stars.tif")
+cellmap <- raster("Data/output/Chapter5/Low_res_resistance_surface.tif")
 
 
 # Match resolutions with the cost surface (cellmap)

@@ -8,9 +8,9 @@ library(raster)
 library(terra)
 library(stars)
 library(nngeo)
-end_sf <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp")
-merged_shp <- st_read("data/spatial/area_of_interest/aoi.shp")
-dem_raster <- rast("data/spatial/SRTM90_V4/SRTM90_V4.elevation_all.tif")
+end_sf <- st_read("data/input/area_of_interest/high_elevation_pas.shp")
+merged_shp <- st_read("data/input/area_of_interest/aoi.shp")
+dem_raster <- rast("data/input/SRTM90_V4/SRTM90_V4.elevation_all.tif")
 ```
 
 ## General conclusions
@@ -36,11 +36,11 @@ In this exercise we only consider protected high elevation habitats. However, th
 library(terra)
 
 # Import the biomass layer
-nasa_biomass <- rast("data/spatial/biomass/NASA_biomass_desnity_estimation.tif")
+nasa_biomass <- rast("data/input/biomass/NASA_biomass_desnity_estimation.tif")
 #plot(nasa_biomass, las=1, main="")
 
 # Import the high elevation layer
-dem_raster <- rast("data/spatial/SRTM90_V4/SRTM90_V4.elevation_all.tif")
+dem_raster <- rast("data/input/SRTM90_V4/SRTM90_V4.elevation_all.tif")
 #plot(dem_raster, las=1, main="")
 high_raster <- dem_raster
 # Make a binary raster
@@ -63,7 +63,7 @@ plot(high_forest_binary, col="red")
 
 
 # Import the protected areas
-high_pa <- vect("data/spatial/area_of_interest/high_elevation_pas.shp")
+high_pa <- vect("data/input/area_of_interest/high_elevation_pas.shp")
 plot(high_pa, add=T, col="green")
 high_pa_sf <- sf::st_as_sf(high_pa)
 high_pa_ras <- rasterize(high_pa,high_forest_binary, 
@@ -95,15 +95,15 @@ high_pa_sf <- st_intersection(high_pa_sf, merged_shp)
 high_forest_sf <- st_intersection(high_forest_sf, merged_shp)
 
 plot(high_forest_sf)
-st_write(high_forest_sf, "data/Chapter7/high_forest_sf.shp")
+st_write(high_forest_sf, "data/output/Chapter7/high_forest_sf.shp")
 
 ```
 
 
 ```{r, message=F, warning=F, echo=F, include=F}
-high_forest_sf <- st_read("data/Chapter7/high_forest_sf.shp")
+high_forest_sf <- st_read("data/output/Chapter7/high_forest_sf.shp")
 
-high_pa <- vect("data/spatial/area_of_interest/high_elevation_pas.shp")
+high_pa <- vect("data/input/area_of_interest/high_elevation_pas.shp")
 high_pa_sf <- sf::st_as_sf(high_pa)
 ```
 
@@ -152,7 +152,7 @@ plot(low_forest_binary, col="red")
 
 
 # Import the protected areas
-low_pa <- vect("data/spatial/protected_areas/lowland_protected_areas.shp")
+low_pa <- vect("data/input/protected_areas/lowland_protected_areas.shp")
 plot(low_pa, add=T, col="green")
 low_pa_sf <- sf::st_as_sf(low_pa)
 low_pa_ras <- rasterize(low_pa,low_forest_binary, 
@@ -185,14 +185,14 @@ low_forest_sf <- st_intersection(low_forest_sf, merged_shp)
 
 plot(low_forest_sf)
 
-st_write(low_forest_sf, "data/Chapter7/low_forest_sf.shp")
+st_write(low_forest_sf, "data/output/Chapter7/low_forest_sf.shp")
 ```
 
 
 ```{r, message=F, warning=F, echo=F}
-low_pa <- vect("data/spatial/protected_areas/lowland_protected_areas.shp")
+low_pa <- vect("data/input/protected_areas/lowland_protected_areas.shp")
 low_pa_sf <- sf::st_as_sf(low_pa)
-low_forest_sf <- st_read("data/Chapter7/low_forest_sf.shp")
+low_forest_sf <- st_read("data/output/Chapter7/low_forest_sf.shp")
 
 leaflet() %>%
    addProviderTiles("Esri.WorldGrayCanvas", group="Basic") %>%
@@ -219,8 +219,8 @@ Given that we have identified putative climate corridors, it follows that we sho
 There is a certain degree of congruence between the least cost paths and the existing MBCs, however they are highly region and context specific.  
 ```{r, eval=T, echo=F, message=F, warning=F, include=F}
 # Read in the corridor layer
-CBM_shp<- st_read("data/spatial/CBM Regional/cbm_regional.shp", quiet = TRUE)
-end_poly <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp")
+CBM_shp<- st_read("data/input/CBM Regional/cbm_regional.shp", quiet = TRUE)
+end_poly <- st_read("data/input/area_of_interest/high_elevation_pas.shp")
 end_poly_17N <- st_transform(end_poly, 31971)
 
 st_crs(CBM_shp) <- 4326
@@ -233,11 +233,11 @@ CBM_shp <- CBM_shp[st_is_empty(CBM_shp$geometry)==FALSE,]
 CBM_shp<- CBM_shp[CBM_shp$AREAKM2>0.01,]
 CBM_shp <- st_make_valid(CBM_shp)
 
-ter_finalists_shp_wgs <- st_read("data/Chapter7/final_ter_lcps.shp")
+ter_finalists_shp_wgs <- st_read("data/output/Chapter7/final_ter_lcps.shp")
 
 
 # Prep raster
-res_cur_norm <- rast("data/Chapter6/Coastal_pa_all_low_res/output/pas_lowres_normalised_curmap.asc")
+res_cur_norm <- rast("data/output/Chapter6/Coastal_pa_all_low_res/output/pas_lowres_normalised_curmap.asc")
 terra::crs(res_cur_norm) <- "EPSG:31971"
 
 res_clamp <- clamp(res_cur_norm, upper=0.5)
@@ -327,26 +327,26 @@ The degree to which these forest contribute to climate resilience and the putati
 One of the initial aims of this project was do repeat the analysis we have completed for lowland protected areas for mangroves. However in the course of conducting and discussing this work it became clear that the link between mangroves and high elevation protected areas was not clear. Of greater importance to mangroves is the state of the watersheds which service them. Future work could explore the general disturbance of watershed servicing mangroves (red = high disturbance; blue = low disturbance).
 
 ```{r, eval=T, echo =F, message=F, include=F}
-continental_divide <- st_read("data/spatial/hybas_na_lev01-12_v1c/hybas_na_lev02_v1c.shp")
-watersheds <- st_read("data/spatial/hybas_na_lev01-12_v1c/hybas_na_lev07_v1c.shp")
+continental_divide <- st_read("data/input/hybas_na_lev01-12_v1c/hybas_na_lev02_v1c.shp")
+watersheds <- st_read("data/input/hybas_na_lev01-12_v1c/hybas_na_lev07_v1c.shp")
 watersheds <- st_make_valid(watersheds)
 #plot(st_geometry(watersheds))
 sub_watersheds <- st_intersection(watersheds, merged_shp)
 subwatersheds_17N <- st_transform(sub_watersheds, 31971)
 #plot(st_geometry(test))
 
-cond_1km <-raster("Data/Chapter5/Low_res_resistance_surface.tif")
+cond_1km <-raster("Data/output/Chapter5/Low_res_resistance_surface.tif")
 
 ```
 
 ```{r, eval=F, echo=F}
 test <- extract(cond_1km,subwatersheds_17N, fun=mean, na.rm=T)
 subwatersheds_17N$avg_cond <- test
-st_write(subwatersheds_17N, "Data/Chapter7/watershed_conductivity.shp" )
+st_write(subwatersheds_17N, "Data/output/Chapter7/watershed_conductivity.shp" )
 ```
 
 ```{r, include=F}
-subwatersheds_17N<- st_read("Data/Chapter7/watershed_conductivity.shp")
+subwatersheds_17N<- st_read("Data/output/Chapter7/watershed_conductivity.shp")
 
 ```
 

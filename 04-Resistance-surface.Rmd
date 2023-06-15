@@ -25,10 +25,10 @@ library(elevatr)
 
 # Import required data files
 
-merged_shp <- st_read("data/spatial/area_of_interest/aoi.shp")
-base_shp <- st_read("data/spatial/area_of_interest/base_aoi.shp", quiet = TRUE)
-high_pa <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp")
-mangrove_large <- st_read("data/spatial/mangroves/mangrove_large_1kmsq.shp")
+merged_shp <- st_read("data/input/area_of_interest/aoi.shp")
+base_shp <- st_read("data/input/area_of_interest/base_aoi.shp", quiet = TRUE)
+high_pa <- st_read("data/input/area_of_interest/high_elevation_pas.shp")
+mangrove_large <- st_read("data/input/mangroves/mangrove_large_1kmsq.shp")
 #plot(st_geometry(high_pa))
 ```
 
@@ -87,24 +87,24 @@ The following is a down-scaled map of the whole survey area.
 
 ```{r ch4_8new, echo=F, message=F, warning=F, eval=F}
 # New method
-lc <- rast("data/spatial/landcover/ESACCI-global-10m_merged.tif")
+lc <- rast("data/input/landcover/ESACCI-global-10m_merged.tif")
 
 # Reduce res - by factor of 10
 lc_100m <- aggregate(lc, fact=10, fun="modal")
 
-lc_key <- read.csv("data/spatial/landcover/ESA_v2_labels.csv", header=T, sep=",")
+lc_key <- read.csv("data/input/landcover/ESA_v2_labels.csv", header=T, sep=",")
 lc_key$rgb <- paste0("#",lc_key$rgb ) 
 coltab(lc_100m)  <- data.frame(value=lc_key$NB_LAB, col=lc_key$rgb)
 plot(lc)
 #plot(lc_100m)
-writeRaster(lc_100m, "data/spatial/landcover/ESACCI-global-100m_merged.tif", overwrite=T)
+writeRaster(lc_100m, "data/input/landcover/ESACCI-global-100m_merged.tif", overwrite=T)
 
 ```
 
 ```{r}
-lc_100m <- rast("data/spatial/landcover/ESACCI-global-100m_merged.tif")
+lc_100m <- rast("data/input/landcover/ESACCI-global-100m_merged.tif")
 
-lc_key <- read.csv("data/spatial/landcover/ESA_v2_labels.csv", header=T, sep=",")
+lc_key <- read.csv("data/input/landcover/ESA_v2_labels.csv", header=T, sep=",")
 lc_key$rgb <- paste0("#",lc_key$rgb ) 
 
 # Remove no data
@@ -146,8 +146,8 @@ elevation[elevation<0]<- -100
 raster_utm <- projectRaster(elevation, crs=31971)
 
 
-writeRaster(elevation, "Data/Chapter6/Case_study_1_Osa/elevation.tif", overwrite=TRUE)
-writeRaster(raster_utm, "Data/Chapter6/Case_study_1_Osa/elevation_utm.tif", overwrite=TRUE)
+writeRaster(elevation, "Data/output/Chapter6/Case_study_1_Osa/elevation.tif", overwrite=TRUE)
+writeRaster(raster_utm, "Data/output/Chapter6/Case_study_1_Osa/elevation_utm.tif", overwrite=TRUE)
 
 
 ```
@@ -239,22 +239,22 @@ The map below has stacked several rasters in order to directly compare them.
 Use the menu contained in the white box to view the different data layers. 
 
 ```{r ch4_11, echo=F, message=F, warning=F}
-fh <- rast("data/spatial/height/global_forest_canopy_height_2005.1.tif")
+fh <- rast("data/input/height/global_forest_canopy_height_2005.1.tif")
 fh_sub  <- crop(fh, aoi)
 fh_sub_ras  <- as(fh_sub,"Raster")
 
-ghm <- rast("data/spatial/human_modification_index/gHM_2016.tif")
+ghm <- rast("data/input/human_modification_index/gHM_2016.tif")
 ghm_sub  <- crop(ghm, aoi)
 ghm_sub_ras  <- as(ghm_sub,"Raster")
 # Invert it so it plot the same as forest height
 ghm_sub_ras <- ghm_sub_ras*-1
 
-biomass <- rast("data/spatial/biomass/NASA_biomass_desnity_estimation.tif")
+biomass <- rast("data/input/biomass/NASA_biomass_desnity_estimation.tif")
 biomass_sub  <- crop(biomass, aoi)
 biomass_sub_ras  <- as(biomass_sub,"Raster")
 
-gfc <- rast("data/spatial/gfc/global_forest_change_2021_v1_9.treecover2000_Osa.tif")
-#gfc_new <- rast("data/spatial/gfc/global_forest_change_2021_v1_9_2022_OSA.tif")
+gfc <- rast("data/input/gfc/global_forest_change_2021_v1_9.treecover2000_Osa.tif")
+#gfc_new <- rast("data/input/gfc/global_forest_change_2021_v1_9_2022_OSA.tif")
 
 gfc_sub  <- crop(gfc, aoi)
 biomass_sub_ras  <- as(biomass_sub,"Raster")
@@ -353,7 +353,7 @@ m2 <- matrix(m2, ncol=2, byrow = TRUE)
   # Merge for final raster
 
 library(terra)
-lc <- rast("data/spatial/landcover/ESACCI-global-100m_merged.tif")
+lc <- rast("data/input/landcover/ESACCI-global-100m_merged.tif")
 
 #Subset to just osa xmin, x max, ymin, ymax
 aoi <-  ext(-84, -82.5,8.38,9.38)
@@ -406,14 +406,14 @@ The map shows two layers the 'original' and the 'modified' (after accounting for
 cost_final <- lc_re*final_modifier
 #plot(cost_final)
 
-lc_100m <- rast("data/spatial/landcover/ESACCI-global-100m_merged.tif")
+lc_100m <- rast("data/input/landcover/ESACCI-global-100m_merged.tif")
 base_terra <- vect(base_shp)
 
 # First mask the outline then do large waterbodies 
 cost_final  <-mask(cost_final,base_terra)
 
 # Mask out large water bodies
-cond_1km<- raster("Data/Chapter5/Low_res_resistance_surface.tif")
+cond_1km<- raster("Data/output/Chapter5/Low_res_resistance_surface.tif")
 #plot(cond_1km)
 cond_1km[cond_1km>0]<-1
 #plot(cond_1km)
@@ -436,11 +436,11 @@ leaflet() %>%
     overlayGroups = c("Original", "Modified")) 
 
 
-dir.create("Data/Chapter6/Case_study_1_Osa/")
+dir.create("Data/output/Chapter6/Case_study_1_Osa/")
 
-writeRaster(cost_final_ras, "Data/Chapter6/Case_study_1_Osa/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
+writeRaster(cost_final_ras, "Data/output/Chapter6/Case_study_1_Osa/cellmap.asc", overwrite=TRUE, gdal="DECIMAL_PRECISION=0", NAflag=-9999)
 
-writeRaster(cost_final_ras, "Data/Chapter6/Case_study_1_Osa/cost_surface_100m.tif", overwrite=TRUE)
+writeRaster(cost_final_ras, "Data/output/Chapter6/Case_study_1_Osa/cost_surface_100m.tif", overwrite=TRUE)
 
 ```
 
@@ -452,9 +452,9 @@ Using the same parameters as above to create a conductance surface across the wh
 
 ```{r, echo=F, include=F, warning=F, message=F, eval=F}
 library(terra)
-lc_100m <- rast("data/spatial/landcover/ESACCI-global-100m_merged.tif")
+lc_100m <- rast("data/input/landcover/ESACCI-global-100m_merged.tif")
 base_terra <- vect(base_shp)
-lc_key <- read.csv("data/spatial/landcover/ESA_v2_labels.csv", header=T, sep=",")
+lc_key <- read.csv("data/input/landcover/ESA_v2_labels.csv", header=T, sep=",")
 lc_key$rgb <- paste0("#",lc_key$rgb ) 
 lc_100m <- mask(lc_100m, base_terra)
 # Remove no data
@@ -506,7 +506,7 @@ cost_final <- lc_re*final_modifier
 
 
 # Mask out large water bodies - use the archived conducatnce layer
-cond_1km<- raster("Data/Chapter5/Low_res_resistance_surface.tif")
+cond_1km<- raster("Data/output/Chapter5/Low_res_resistance_surface.tif")
 #plot(cond_1km)
 cond_1km[cond_1km>0]<-1
 #plot(cond_1km)
@@ -523,10 +523,10 @@ cost_final  <-mask(cost_final, tmp)
 # 100m Resoltuion #######################
 #########################################
 
-writeRaster(cost_final, "Data/Chapter5/High_res_resistance_surface_final.tif", overwrite=T)
+writeRaster(cost_final, "Data/output/Chapter5/High_res_resistance_surface_final.tif", overwrite=T)
 
 # Make a 17N version
-cost_final<- rast("Data/Chapter5/High_res_resistance_surface_final.tif")
+cost_final<- rast("Data/output/Chapter5/High_res_resistance_surface_final.tif")
 tmp <- project(cost_final, "+proj=utm +zone=17 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs +type=crs")
 
 # Also make a version with NA's removed (required for least cost path models)
@@ -534,27 +534,27 @@ tmp2 <- classify(tmp, cbind(NA, 0.000001))
 tmp <- as(tmp,"Raster")
 tmp2 <- as(tmp2,"Raster")
 
-writeRaster(tmp, "Data/Chapter5/High_res_resistance_surface_final_17N.tif", overwrite=T)
-writeRaster(tmp2, "Data/Chapter5/High_res_resistance_surface_final_17N_NO_NA.tif", overwrite=T)
+writeRaster(tmp, "Data/output/Chapter5/High_res_resistance_surface_final_17N.tif", overwrite=T)
+writeRaster(tmp2, "Data/output/Chapter5/High_res_resistance_surface_final_17N_NO_NA.tif", overwrite=T)
 
 #########################################
 # 1km resolution ########################
 #########################################
 # Make  1km version too 
 
-cost_final <- rast("Data/Chapter5/High_res_resistance_surface_final.tif")
-cost_final_17N <- rast("Data/Chapter5/High_res_resistance_surface_final_17N.tif")
-cost_final_17N_NO_NA <- rast("Data/Chapter5/High_res_resistance_surface_final_17N_NO_NA.tif")
+cost_final <- rast("Data/output/Chapter5/High_res_resistance_surface_final.tif")
+cost_final_17N <- rast("Data/output/Chapter5/High_res_resistance_surface_final_17N.tif")
+cost_final_17N_NO_NA <- rast("Data/output/Chapter5/High_res_resistance_surface_final_17N_NO_NA.tif")
 
 # Added na.rm=T -> so the missing data doesnt negate the whole pixel
 cost_final_1km <- aggregate(cost_final, fact=10, fun="mean", na.rm=T)
-writeRaster(cost_final_1km, "Data/Chapter5/Low_res_resistance_surface_final.tif", overwrite=T)
+writeRaster(cost_final_1km, "Data/output/Chapter5/Low_res_resistance_surface_final.tif", overwrite=T)
 
 cost_final_1km_17N <- aggregate(cost_final_17N, fact=10, fun="mean", na.rm=T)
-writeRaster(cost_final_1km_17N, "Data/Chapter5/Low_res_resistance_surface_final_17N.tif", overwrite=T)
+writeRaster(cost_final_1km_17N, "Data/output/Chapter5/Low_res_resistance_surface_final_17N.tif", overwrite=T)
 
 cost_final_1km_17N_NO_NA <- aggregate(cost_final_17N_NO_NA, fact=10, fun="mean", na.rm=T)
-writeRaster(cost_final_1km_17N_NO_NA, "Data/Chapter5/Low_res_resistance_surface_final_NO_NA_17N.tif", overwrite=T)
+writeRaster(cost_final_1km_17N_NO_NA, "Data/output/Chapter5/Low_res_resistance_surface_final_NO_NA_17N.tif", overwrite=T)
 
 #########################################
 # 200m resolution ########################
@@ -563,13 +563,13 @@ writeRaster(cost_final_1km_17N_NO_NA, "Data/Chapter5/Low_res_resistance_surface_
 
 # Added na.rm=T -> so the missing data doesnt negate the whole pixel
 cost_final_200m <- aggregate(cost_final, fact=2, fun="mean", na.rm=T)
-writeRaster(cost_final_200m, "Data/Chapter5/Mid_res_resistance_surface_final.tif", overwrite=T)
+writeRaster(cost_final_200m, "Data/output/Chapter5/Mid_res_resistance_surface_final.tif", overwrite=T)
 
 cost_final_200m_17N <- aggregate(cost_final_17N, fact=2, fun="mean", na.rm=T)
-writeRaster(cost_final_200m_17N, "Data/Chapter5/Mid_res_resistance_surface_final_17N.tif", overwrite=T)
+writeRaster(cost_final_200m_17N, "Data/output/Chapter5/Mid_res_resistance_surface_final_17N.tif", overwrite=T)
 
 cost_final_200m_17N_NO_NA <- aggregate(cost_final_17N_NO_NA, fact=2, fun="mean", na.rm=T)
-writeRaster(cost_final_200m_17N_NO_NA, "Data/Chapter5/Mid_res_resistance_surface_final_17N_NO_NA.tif", overwrite=T)
+writeRaster(cost_final_200m_17N_NO_NA, "Data/output/Chapter5/Mid_res_resistance_surface_final_17N_NO_NA.tif", overwrite=T)
 
 cost_final_ras <- as(cost_final_1km,"Raster")
 
@@ -585,7 +585,7 @@ leaflet() %>%
 ```
 
 ```{r, message=F, warning=F, echo=F}
-cost_final_1km <- raster("Data/Chapter5/Low_res_resistance_surface_final.tif")
+cost_final_1km <- raster("Data/output/Chapter5/Low_res_resistance_surface_final.tif")
 
 cost_final_ras <- as(cost_final_1km,"Raster")
 

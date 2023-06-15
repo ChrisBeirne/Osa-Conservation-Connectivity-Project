@@ -16,7 +16,7 @@ knitr::opts_chunk$set(
 #####################################################
 ###load packages###
 # Install latest rgee
-#remotes::install_github("r-spatial/rgee", force=T)
+#remotes::install_github("r-input/rgee", force=T)
 
 list.of.packages <- c("stars",       
                       "sf",
@@ -56,7 +56,7 @@ drive_auth()
 
 ```{r ch2_3, eval=F}
 # Only required if using RGEE 
-remotes::install_github("r-spatial/rgee", force=T)
+remotes::install_github("r-input/rgee", force=T)
 remotes::install_github("r-earthengine/rgeeExtra")
 library("rgee")
 library("rgeeExtra")
@@ -82,49 +82,98 @@ reticulate::py_config()
 
 
 ```{r ch2_4, warning=F, message=F, include=F, eval=F}
-# This is only required if running the code for the first time
-# Download available shapefiles
+# DOWNLOAD THE SOURCE DATA
+# Before running the code you must download the source data as zip folders, then store them in the approriate locations
 dir.create("data")
-dir.create("data/spatial")
+dir.create("data/input")
+dir.create("data/output")
 
-#folder link to id
-jp_folder = "https://drive.google.com/drive/folders/1YO0y73_jQ7Mo1fOnoI5EhCUDk5K9JEva"
-folder_id = drive_get(as_id(jp_folder))
+# # Download and unzip the contents of the following and place it into the data/input folder
+# https://drive.google.com/drive/folders/1YO0y73_jQ7Mo1fOnoI5EhCUDk5K9JEva
 
-#find files in folder
-files = drive_ls(folder_id)
-i <- 1
-#loop dirs and download files inside them
-for (i in seq_along(files$name)) {
-  #list files
-  i_dir = drive_ls(files[i, ])
-  
-  #mkdir
-  dir.create(paste0("data/spatial/",files$name[i]))
-  
-  #download files
-  for (file_i in seq_along(i_dir$name)) {
-    #fails if already exists
-    try({
-      drive_download(
-        as_id(i_dir$id[file_i]),
-        path = paste0("data/spatial/", files$name[i], "/", i_dir$name[file_i])
-      )
-    })
-  }
-}
+# # Download and unzip the contents of the following and put it in the data/output folder
+# https://drive.google.com/drive/folders/1GjkcCk8bOopJheYSE5H2VVqD9o5svO9R
 
 
-# Download the low res version of Land cover map too
-jp_folder = "https://drive.google.com/drive/folders/1YYaJ01gIMD9qs8cxKYqWmPk_lzyStDWy"
-folder_id = drive_get(as_id(jp_folder))
-files = drive_ls(folder_id)
-for(i in 1:length(files))
-{
-drive_download(
-        as_id(files$id[i]),
-        path = paste0("data/spatial/landcover/", files$name[i]))
-}
+###############
+# ARCHIVED BELOW #
+
+# I previously used the google drive function to download all the data
+# Now things have become more complex, this has become obselete [Below]
+
+# # Download the input data
+
+# 
+# #folder link to id
+# jp_folder = "https://drive.google.com/drive/folders/1YO0y73_jQ7Mo1fOnoI5EhCUDk5K9JEva"
+# folder_id = drive_get(as_id(jp_folder))
+# 
+# #find files in folder
+# files = drive_ls(folder_id)
+# i <- 1
+# #loop dirs and download files inside them
+# for (i in seq_along(files$name)) {
+#   #list files
+#   i_dir = drive_ls(files[i, ])
+#   
+#   #mkdir
+#   dir.create(paste0("data/input/",files$name[i]))
+#   
+#   #download files
+#   for (file_i in seq_along(i_dir$name)) {
+#     #fails if already exists
+#     try({
+#       drive_download(
+#         as_id(i_dir$id[file_i]),
+#         path = paste0("data/input/", files$name[i], "/", i_dir$name[file_i])
+#       )
+#     })
+#   }
+# }
+# 
+# 
+# 
+# # Download the output data
+# 
+# #folder link to id
+# jp_folder = "https://drive.google.com/drive/folders/1GjkcCk8bOopJheYSE5H2VVqD9o5svO9R"
+# folder_id = drive_get(as_id(jp_folder))
+# 
+# #find files in folder
+# files = drive_ls(folder_id)
+# i <- 1
+# file_i <- 1
+# #loop dirs and download files inside them
+# for (i in seq_along(files$name)) {
+#   #list files
+#   i_dir = drive_ls(files[i, ])
+#   
+#   #mkdir
+#   dir.create(paste0("data/",files$name[i]))
+#   
+#   
+#   #download files
+#   for (file_i in seq_along(i_dir$name)) {
+#     #fails if already exists
+#     try({
+#       drive_download(
+#         as_id(i_dir$id[file_i]),
+#         path = paste0("data/", files$name[i], "/", i_dir$name[file_i]), overwrite=T)
+#     })
+#   }
+# }
+# 
+# 
+# # Download the low res version of Land cover map too
+# jp_folder = "https://drive.google.com/drive/folders/1YYaJ01gIMD9qs8cxKYqWmPk_lzyStDWy"
+# folder_id = drive_get(as_id(jp_folder))
+# files = drive_ls(folder_id)
+# for(i in 1:length(files))
+# {
+# drive_download(
+#         as_id(files$id[i]),
+#         path = paste0("data/input/landcover/", files$name[i]))
+# }
 
 ```
 
@@ -176,26 +225,26 @@ base_aoi <- ms_filter_islands(
 #  force_FC = TRUE,
   sys_mem = 8
 )
-st_write(base_aoi, "data/spatial/area_of_interest/all_countries_expanded.shp")
+st_write(base_aoi, "data/input/area_of_interest/all_countries_expanded.shp")
 
 base_aoi <- st_union(base_aoi)
 
 # Write these files
-st_write(all_shp,"data/spatial/area_of_interest/all_countries_islands.shp" )
-st_write(focal_shp,"data/spatial/area_of_interest/focal_countries.shp" )
-st_write(merged_shp, "data/spatial/area_of_interest/aoi.shp")
-st_write(base_aoi, "data/spatial/area_of_interest/base_aoi.shp", append=F)
+st_write(all_shp,"data/input/area_of_interest/all_countries_islands.shp" )
+st_write(focal_shp,"data/input/area_of_interest/focal_countries.shp" )
+st_write(merged_shp, "data/input/area_of_interest/aoi.shp")
+st_write(base_aoi, "data/input/area_of_interest/base_aoi.shp", append=F)
 ```
 
 
 The full focal area spans:
 
 ```{r ch2_6}
-all_shp <- st_read("data/spatial/area_of_interest/all_countries_islands.shp", quiet = TRUE)
-focal_shp <- st_read("data/spatial/area_of_interest/focal_countries.shp", quiet = TRUE)
-merged_shp <- st_read("data/spatial/area_of_interest/aoi.shp", quiet = TRUE)
-base_shp <- st_read("data/spatial/area_of_interest/base_aoi.shp", quiet = TRUE)
-base_terra <- vect("data/spatial/area_of_interest/base_aoi.shp", crs="epsg:4326")
+all_shp <- st_read("data/input/area_of_interest/all_countries_islands.shp", quiet = TRUE)
+focal_shp <- st_read("data/input/area_of_interest/focal_countries.shp", quiet = TRUE)
+merged_shp <- st_read("data/input/area_of_interest/aoi.shp", quiet = TRUE)
+base_shp <- st_read("data/input/area_of_interest/base_aoi.shp", quiet = TRUE)
+base_terra <- vect("data/input/area_of_interest/base_aoi.shp", crs="epsg:4326")
 
 
 leaflet(base_shp) %>%  
@@ -252,7 +301,7 @@ legend("topleft", c("Included", "Excluded"), col=c(met.brewer("Nizami")[5], met.
 ```{r ch2_9, eval=F, include=F}
 #Excluded
 # Check this also overlaps with the Mesoamerican Biological Corridor
-CBM_shp<- st_read("data/spatial/CBM Regional/cbm_regional.shp", quiet = TRUE)
+CBM_shp<- st_read("data/input/CBM Regional/cbm_regional.shp", quiet = TRUE)
 plot(st_geometry(merged_shp))
 plot(st_geometry(CBM_shp), add=T, col="red")
 ```
@@ -376,21 +425,21 @@ focal_pa <- focal_pa[duplicated(focal_pa$geometry)==F,]
 
 
 # Store this file
-dir.create("data/spatial/WDPA_protected_areas")
-saveRDS(focal_pa, "data/spatial/WDPA_protected_areas/focal_area_pa_shp.RDS")
-saveRDS(all_pa, "data/spatial/WDPA_protected_areas/all_area_pa_shp.RDS")
+dir.create("data/input/WDPA_protected_areas")
+saveRDS(focal_pa, "data/input/WDPA_protected_areas/focal_area_pa_shp.RDS")
+saveRDS(all_pa, "data/input/WDPA_protected_areas/all_area_pa_shp.RDS")
 
 #Upload to drive
-drive_upload("data/spatial/WDPA_protected_areas/focal_area_pa_shp.RDS", as_id("https://drive.google.com/drive/u/0/folders/1KgNuMrKPyskUmroOBGISt3FxAsaBLmRv"))
-drive_upload("data/spatial/WDPA_protected_areas/all_area_pa_shp.RDS", as_id("https://drive.google.com/drive/u/0/folders/1KgNuMrKPyskUmroOBGISt3FxAsaBLmRv"))
+drive_upload("data/input/WDPA_protected_areas/focal_area_pa_shp.RDS", as_id("https://drive.google.com/drive/u/0/folders/1KgNuMrKPyskUmroOBGISt3FxAsaBLmRv"))
+drive_upload("data/input/WDPA_protected_areas/all_area_pa_shp.RDS", as_id("https://drive.google.com/drive/u/0/folders/1KgNuMrKPyskUmroOBGISt3FxAsaBLmRv"))
 
 ```
 
 ```{r  ch2_11, echo=F, message=F, warning=F}
 # Filter out islands and areas not cleaned previously
 
-focal_pa <- readRDS( "data/spatial/WDPA_protected_areas/focal_area_pa_shp.RDS")
-all_pa <- readRDS( "data/spatial/WDPA_protected_areas/all_area_pa_shp.RDS")
+focal_pa <- readRDS( "data/input/WDPA_protected_areas/focal_area_pa_shp.RDS")
+all_pa <- readRDS( "data/input/WDPA_protected_areas/all_area_pa_shp.RDS")
 
 # Remove corredor fronterizo
 focal_pa <- focal_pa[focal_pa$NAME!="Corredor Fronterizo",]
@@ -414,11 +463,11 @@ all_pa <- all_pa[all_pa$NAME!="Archipiélago de Solentiname",]
 all_pa <- all_pa[all_pa$NAME!="Humedal Istiam Peña Inculca",]
 
 
-saveRDS(focal_pa, "data/spatial/WDPA_protected_areas/focal_area_pa_shp.RDS")
-saveRDS(all_pa, "data/spatial/WDPA_protected_areas/all_area_pa_shp.RDS")
+saveRDS(focal_pa, "data/input/WDPA_protected_areas/focal_area_pa_shp.RDS")
+saveRDS(all_pa, "data/input/WDPA_protected_areas/all_area_pa_shp.RDS")
 
-drive_upload("data/spatial/WDPA_protected_areas/focal_area_pa_shp.RDS", as_id("https://drive.google.com/drive/u/0/folders/1KgNuMrKPyskUmroOBGISt3FxAsaBLmRv"))
-drive_upload("data/spatial/WDPA_protected_areas/all_area_pa_shp.RDS", as_id("https://drive.google.com/drive/u/0/folders/1KgNuMrKPyskUmroOBGISt3FxAsaBLmRv"))
+drive_upload("data/input/WDPA_protected_areas/focal_area_pa_shp.RDS", as_id("https://drive.google.com/drive/u/0/folders/1KgNuMrKPyskUmroOBGISt3FxAsaBLmRv"))
+drive_upload("data/input/WDPA_protected_areas/all_area_pa_shp.RDS", as_id("https://drive.google.com/drive/u/0/folders/1KgNuMrKPyskUmroOBGISt3FxAsaBLmRv"))
 
 
 plot(st_geometry(merged_shp), col=rgb(0,0,0,0.1), border=F)
@@ -506,33 +555,33 @@ remove(dem)
 # First time run 
 
 # Read in upper
-#dem_raster1 <- read_stars("data/spatial/SRTM90_V4/SRTM90_V4.elevation_upper.tif")
+#dem_raster1 <- read_stars("data/input/SRTM90_V4/SRTM90_V4.elevation_upper.tif")
 # Read in lower
-#dem_raster2 <- read_stars("data/spatial/SRTM90_V4/SRTM90_V4.elevation_lower.tif")
+#dem_raster2 <- read_stars("data/input/SRTM90_V4/SRTM90_V4.elevation_lower.tif")
 
 # Stitch together
 #dem_raster <- st_mosaic(dem_raster1, dem_raster2)
 
-# dem_raster <- read_stars("data/spatial/SRTM90_V4/SRTM90_V4.elevation.tif")
+# dem_raster <- read_stars("data/input/SRTM90_V4/SRTM90_V4.elevation.tif")
 # # Mask out the areas you are not interested in
 #dem_raster <- st_crop(dem_raster, base_shp)
 # plot(dem_raster)
 
-# write_stars(dem_raster, "data/spatial/SRTM90_V4/SRTM90_V4.elevation_all.tif")
+# write_stars(dem_raster, "data/input/SRTM90_V4/SRTM90_V4.elevation_all.tif")
 #library(terra)
-#dem_raster <- rast("data/spatial/SRTM90_V4/SRTM90_V4.elevation_all.tif")
+#dem_raster <- rast("data/input/SRTM90_V4/SRTM90_V4.elevation_all.tif")
 #dem_crop <- mask(dem_raster, base_terra)
-#writeRaster(dem_crop, "data/spatial/SRTM90_V4/SRTM90_V4.elevation_mask.tif")
+#writeRaster(dem_crop, "data/input/SRTM90_V4/SRTM90_V4.elevation_mask.tif")
 
 
-dem_crop <- rast("data/spatial/SRTM90_V4/SRTM90_V4.elevation_mask.tif")
+dem_crop <- rast("data/input/SRTM90_V4/SRTM90_V4.elevation_mask.tif")
 plot(dem_crop)
 
 # # Mask out the areas you are not interested in
 # gfc_2020 <- st_crop(gfc_2020, base_shp)
-# write_stars(gfc_2020, "data/spatial/gfc/global_forest_change_2020_v1_8.treecover2000.tif")
+# write_stars(gfc_2020, "data/input/gfc/global_forest_change_2020_v1_8.treecover2000.tif")
 
-#dem_raster <- read_stars("data/spatial/SRTM90_V4/SRTM90_V4.elevation.tif")
+#dem_raster <- read_stars("data/input/SRTM90_V4/SRTM90_V4.elevation.tif")
 #plot(dem_raster, las=1,nbreaks=11 ,breaks="equal", col=terrain.colors(10), bg="grey", main="")
 ```
 
@@ -601,14 +650,14 @@ path <- gfc_remain[["treecover2000"]]$getDownloadUrl(geom_params)
 
 ```{r  ch2_18}
 # Run hashed files the first time only
-# gfc_2020_upper <- rast("data/spatial/gfc/global_forest_change_2021_v1_9.treecover2000_upper.tif")
-# gfc_2020_lower <- rast("data/spatial/gfc/global_forest_change_2021_v1_9.treecover2000_lower.tif")
+# gfc_2020_upper <- rast("data/input/gfc/global_forest_change_2021_v1_9.treecover2000_upper.tif")
+# gfc_2020_lower <- rast("data/input/gfc/global_forest_change_2021_v1_9.treecover2000_lower.tif")
 # m2 <- mosaic(gfc_2020_upper, gfc_2020_lower)
 # gfc2020 <- mask(m2, base_terra)
 # plot(gfc2020)
-# writeRaster(gfc2020, "data/spatial/gfc/global_forest_change_2021_v1_9.treecover2000.tif")
+# writeRaster(gfc2020, "data/input/gfc/global_forest_change_2021_v1_9.treecover2000.tif")
 
-gfc_2020 <- rast("data/spatial/gfc/global_forest_change_2021_v1_9.treecover2000.tif")
+gfc_2020 <- rast("data/input/gfc/global_forest_change_2021_v1_9.treecover2000.tif")
 plot(gfc_2020)
 
 ```
@@ -641,16 +690,16 @@ test <- ee_imagecollection_to_local(
   maxPixels = 1e+09
 )
 
-nasa_biomass <- rast("data/spatial/biomass/NASA_biomass_desnity_estimation.tif")
+nasa_biomass <- rast("data/input/biomass/NASA_biomass_desnity_estimation.tif")
 # Mask out the areas you are not interested in
 nasa_biomass <- mask(nasa_biomass, base_terra)
 plot(nasa_biomass)
-writeRaster(nasa_biomass, "data/spatial/biomass/NASA_biomass_desnity_estimation.tif", overwrite=T)
+writeRaster(nasa_biomass, "data/input/biomass/NASA_biomass_desnity_estimation.tif", overwrite=T)
 
 ```
 
 ```{r ch2_20}
-nasa_biomass <- rast("data/spatial/biomass/NASA_biomass_desnity_estimation.tif")
+nasa_biomass <- rast("data/input/biomass/NASA_biomass_desnity_estimation.tif")
 plot(nasa_biomass)
 ```
 
@@ -683,18 +732,18 @@ path <- height$getDownloadUrl(geom_params)
 # sAVE THE FILE TO YOUR GOOGLE DRIVE MANUALLY (DONE)
 
 # Run hashed files the first time only
-# height_upper <- rast("data/spatial/height/global_forest_canopy_height_2005.1_upper.tif")
-# height_lower <- rast("data/spatial/height/global_forest_canopy_height_2005_lower.1.tif")
+# height_upper <- rast("data/input/height/global_forest_canopy_height_2005.1_upper.tif")
+# height_lower <- rast("data/input/height/global_forest_canopy_height_2005_lower.1.tif")
 # m2 <- mosaic(height_upper, height_lower)
 # height <- mask(m2, base_terra)
 # plot(height)
-# writeRaster(height, "data/spatial/height/global_forest_canopy_height_2005.1.tif", overwrite=T)
+# writeRaster(height, "data/input/height/global_forest_canopy_height_2005.1.tif", overwrite=T)
 
 ```
 
 
 ```{r ch2_22}
-height <- rast("data/spatial/height/global_forest_canopy_height_2005.1.tif")
+height <- rast("data/input/height/global_forest_canopy_height_2005.1.tif")
 plot(height)
 
 ```
@@ -705,7 +754,7 @@ Mangrove data is taken from the [USGS: Global Distribution of Mangroves]  (https
 
 ```{r  ch2_23, eval=F}
 # Original run -> file too big to keep
-man_shp <- st_read("data/spatial/WCMC010_MangrovesUSGS2011_v1_4/14_001_WCMC010_MangroveUSGS2011_v1_4.shp", quiet = TRUE)
+man_shp <- st_read("data/input/WCMC010_MangrovesUSGS2011_v1_4/14_001_WCMC010_MangroveUSGS2011_v1_4.shp", quiet = TRUE)
 man_shp <- st_transform(man_shp,4326)
 tmp <- st_transform(merged_shp,3160)
 tmp2 <- st_buffer(tmp,10000)
@@ -713,13 +762,13 @@ plot(st_geometry(tmp))
 plot(st_geometry(tmp2))
 tmp2 <- st_transform(tmp2, 4326)
 focal_mangrove <- st_intersection(man_shp, tmp2)
-st_write(focal_mangrove, "data/spatial/WCMC010_MangrovesUSGS2011_v1_4/clipped/mangroves_clipped.shp", quiet = TRUE)
+st_write(focal_mangrove, "data/input/WCMC010_MangrovesUSGS2011_v1_4/clipped/mangroves_clipped.shp", quiet = TRUE)
 remove(man_shp)
 ```
 
 
 ```{r ch2_24}
-focal_mangrove <- st_read("data/spatial/WCMC010_MangrovesUSGS2011_v1_4/clipped/mangroves_clipped.shp", quiet = TRUE)
+focal_mangrove <- st_read("data/input/WCMC010_MangrovesUSGS2011_v1_4/clipped/mangroves_clipped.shp", quiet = TRUE)
 plot(st_geometry(merged_shp), col=rgb(0,0,0,0.1), border=F)
 plot(st_geometry(focal_mangrove), add=T, col=met.brewer("Nizami")[2], border=F)
 legend("topright",c("Mangrove","Land"), pch=15, col=c(met.brewer("Nizami")[2],rgb(0,0,0,0.1)))
@@ -758,17 +807,17 @@ test <- ee_imagecollection_to_local(
   maxPixels = 1e+09
 )
 
-ghm_raster <- rast("data/spatial/human_modification_index/gHM_2016.tif")
+ghm_raster <- rast("data/input/human_modification_index/gHM_2016.tif")
 ghm <- mask(ghm_raster, base_terra)
 plot(ghm)
-writeRaster(ghm, "data/spatial/human_modification_index/gHM_2016.tif", overwrite=T)
+writeRaster(ghm, "data/input/human_modification_index/gHM_2016.tif", overwrite=T)
 
 ```
 
 
 ```{r ch2_26}
 # Read in human modification layer
-ghm_raster <- rast("data/spatial/human_modification_index/gHM_2016.tif")
+ghm_raster <- rast("data/input/human_modification_index/gHM_2016.tif")
 plot(ghm_raster)
 
 ```
@@ -792,16 +841,16 @@ test <- ee_imagecollection_to_local(
   scale = 100,
   maxPixels = 6e+10
 )
-to_import <- list.files("data/spatial/landcover/v2_global/", full=T)
+to_import <- list.files("data/input/landcover/v2_global/", full=T)
 r1 <- rast(to_import[1])
 
 dem_crop <- mask(dem_raster, base_terra)
 # lcc <- mask(r1, base_terra)
 # plot(lcc)
-# writeRaster(lcc, "data/spatial/landcover/ESACCI-global-10m.tif", overwrite=T)
+# writeRaster(lcc, "data/input/landcover/ESACCI-global-10m.tif", overwrite=T)
 
-raster_files <- list.files("data/spatial/landcover/v2_global", full.names=T)
-test <- terra::vrt(raster_files, "data/spatial/landcover/virtual_raster", overwrite=T) 
+raster_files <- list.files("data/input/landcover/v2_global", full.names=T)
+test <- terra::vrt(raster_files, "data/input/landcover/virtual_raster", overwrite=T) 
 
 r1<- rast(to_import[1])
 r1_sub <- aggregate(r1,factor=10)
@@ -809,14 +858,14 @@ r2<- rast(to_import[2])
 r2_sub <- aggregate(r2,factor=10)
 test <- terra::mosaic(r1_sub,r2_sub)
 
-writeRaster(test, "data/spatial/landcover/test.tif")
+writeRaster(test, "data/input/landcover/test.tif")
 
 ```
 
 
 ```{r  ch2_27, echo=F}
-lc_raster <- rast("data/spatial/landcover/ESACCI-global-10m_merged.tif")
-lc_key <- read.csv("data/spatial/landcover/ESA_v2_labels.csv", header=T, sep=",")
+lc_raster <- rast("data/input/landcover/ESACCI-global-10m_merged.tif")
+lc_key <- read.csv("data/input/landcover/ESA_v2_labels.csv", header=T, sep=",")
 plot(lc_raster)
 ```
 
@@ -915,16 +964,16 @@ leaflet() %>%
     overlayGroups = c("Protected areas"))
 
 
-st_write(low_focal, "data/spatial/protected_areas/lowland_protected_areas.shp", overwrite=T, append=F)
+st_write(low_focal, "data/input/protected_areas/lowland_protected_areas.shp", overwrite=T, append=F)
 
-st_write(low_contiguous, "data/spatial/area_of_interest/low_elevation_pas_contiguous.shp", append=F)
+st_write(low_contiguous, "data/input/area_of_interest/low_elevation_pas_contiguous.shp", append=F)
 
 
 ```
 
 
 ```{r, echo=F, message=F, warning=F}
-lowland_pa <- st_read("data/spatial/protected_areas/lowland_protected_areas.shp")
+lowland_pa <- st_read("data/input/protected_areas/lowland_protected_areas.shp")
 
 #plot(st_geometry(merged_shp))
 #plot(st_geometry(lowland_pa),add=T, col="red")
@@ -933,7 +982,7 @@ lowland_pa <- st_read("data/spatial/protected_areas/lowland_protected_areas.shp"
 So we have around `r nrow(lowland_pa)` protected areas which are link ocean and land. 
 
 ```{r  ch2_35, warning=F, message=F, include=F }
-lowland_pa <- st_read("data/spatial/protected_areas/lowland_protected_areas.shp")
+lowland_pa <- st_read("data/input/protected_areas/lowland_protected_areas.shp")
 ```
 
 
@@ -1025,8 +1074,8 @@ leaflet() %>%
     options = layersControlOptions(collapsed = FALSE)
   )
 
-st_write(high_focal, "data/spatial/area_of_interest/high_elevation_pas.shp", append=F)
-st_write(high_contiguous, "data/spatial/area_of_interest/high_elevation_pas_contiguous.shp", append=F)
+st_write(high_focal, "data/input/area_of_interest/high_elevation_pas.shp", append=F)
+st_write(high_contiguous, "data/input/area_of_interest/high_elevation_pas_contiguous.shp", append=F)
 
 ```
 
@@ -1042,7 +1091,7 @@ The corridors span the following countries:
 
 ```{r ch2_40}
 # Check this also overlaps with the MBC
-CBM_shp<- st_read("data/spatial/CBM Regional/cbm_regional.shp", quiet = TRUE)
+CBM_shp<- st_read("data/input/CBM Regional/cbm_regional.shp", quiet = TRUE)
 st_crs(CBM_shp) <- 4326
 table(CBM_shp$PAIS)
 corr_shp <- CBM_shp[CBM_shp$PAIS!="Mexico",]
