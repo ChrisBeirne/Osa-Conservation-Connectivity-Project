@@ -12,20 +12,29 @@ There are two general approached to performing connectivity mapping. Firstly, a 
 ```{r ch3_1, include=F, wrning=F, message=F}
 library("devtools")
 #install_github("achubaty/grainscape")
-library(grainscape)
-library(raster)
-library(ggplot2)
-library(ggpubr)
-library(stars)
-library(sf)
-library(leastcostpath)
-library(gdistance)
-library(kableExtra)
-library(igraph)
-library(nngeo)
-library(dplyr)
-library(leaflet)
-library(leafem)
+
+list.of.packages <- c("grainscape",       
+                      "raster",
+                      "ggplot2",            
+                      "ggpubr",
+                      "stars",
+                      "sf",
+                      "leastcostpath",
+                      "gdistance",
+                      "kableExtra",
+                      "igraph",
+                      "nngeo",
+                      "leaflet",
+                      "dplyr",
+                      "leafem")
+
+# Check which ones you dont have
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+#Install the ones you dont have
+if(length(new.packages)) install.packages(new.packages)
+# Load the packages
+lapply(list.of.packages, require, character.only = TRUE)
+
 
 
 
@@ -210,252 +219,6 @@ figure20
 #### How we could use this framework
 
 We could use this framework to evaluate the least cost path between protected reef/coastline areas, up to the 'nearest' elevation park by distance. This would, initially at least, give use a candidate set of locations with which we can use "high" resolution models to evaluate at the local scale (see the Circuitscape section). 
-
-#### Costa Rica example
-
-To demonstrate the type of information we can get from a least cost paths approach we will use Costa Rica as a case study. First we input the data:
-
-```{r ch3_9, echo=F, message=F, warning=F}
-# To start this I need a target raster of the appropriate resolution
-# We can use the GHM rastor as the template
-ghm_raster <- read_stars("data/spatial/human_modification_index/gHM_2016.tif")
-
-ghm_raster_17N <- st_warp(ghm_raster, crs=31971)
-#plot(ghm_raster, las=1,nbreaks=11 ,breaks="equal", col=terrain.colors(10), bg="grey")
-#plot(ghm_raster_17N, las=1,nbreaks=11 ,breaks="equal", col=terrain.colors(10), bg="grey")
-
-focal_pa <- readRDS( "data/spatial/WDPA_protected_areas/focal_area_pa_shp.RDS")
-
-focal_pa <- st_transform(focal_pa,st_crs(4326)) 
-focal_pa <- focal_pa %>% st_sf() %>%  st_cast()
-
-focal_pa_17N <- st_transform(focal_pa, crs=31971)
-
-roi_17N <- st_transform(merged_shp, crs=31971)
-#plot(st_geometry(merged_shp), col=rgb(0,0,0,0.1), border=F)
-#plot(st_geometry(focal_pa[focal_pa$DESIG_TYPE=="International",]), col=met.brewer("Nizami")[1], add=T)
-#plot(st_geometry(focal_pa[focal_pa$DESIG_TYPE=="National",]), col=met.brewer("Nizami")[6], add=T)
-#legend("topright", c("National protected areas"), pch=15, col=c(met.brewer("Nizami")[6]))
-  
-# Convert these to a raster
-
-# First the focal area - assign these the values of 2
-roi_ras <- st_rasterize(roi_17N,template=ghm_raster_17N, align=T) # default 
-
-
-```
-
-Our area of interest is:
-
-```{r ch3_10, echo=F, warning=F, message=F}
-plot(roi_ras, axes = TRUE)
-# Convert the landmass to 2
-roi_ras[[1]][roi_ras[[1]]==0 & is.na(roi_ras[[1]])==F] <- 2
-# All land mass has value <- 2
-
-```
-
-We then import the protected areas and give them a lower resistance (1) the surrounding areas (2):
-
-```{r ch3_11, echo=F, warning=F, message=F}
-# rasterize based on geometry and a column named "value". Change the name of this column if necessary
-pa_ras <- st_rasterize(focal_pa_17N[focal_pa_17N$DESIG_TYPE=="National","geometry"],template=ghm_raster_17N, align=T ) # default 
-# Convert the protected area to 1
-pa_ras[[1]][pa_ras[[1]]>1 & is.na(pa_ras[[1]])==F] <- 1
-# Make non prtected ares 0 
-pa_ras[[1]][is.na(pa_ras[[1]])==T] <- 0
-
-
-#plot(roi_ras, axes=T, main="Focal area")
-#plot(pa_ras, axes=T, main = "Protected areas")
-
-crop_area <- st_as_sfc(st_bbox(roi_ras))
-
-#st_bbox(roi_ras)
-#st_bbox(ghm_raster_17N)
-#st_bbox(pa_ras)
-
-cost_ras <- st_crop(roi_ras, crop_area) - st_crop(pa_ras, crop_area)
-
-#par(mfrow=c(1,3))
-#plot(roi_ras, axes=T, main="Focal area")
-#plot(pa_ras, axes=T, main = "Protected areas")
-plot(cost_ras, axes=T, main="Non-protected areas")
-#plot(ghm_raster_17N)
-
-# Convert to raster
-cost_ras <-  as(cost_ras, "Raster")
-cost_ghm <-  as(ghm_raster_17N, "Raster")
-
-# Make it discrete
-cost_ghm <- round(cost_ghm*10,0)+1
-# Invert it
-cost_ghm <- (cost_ghm*-1)
-cost_ghm <- (cost_ghm+12)
-
-#par(mfrow=c(1,1))
-#plot(cost_ghm)
-
-# Visualise on leaflet
-# library(leafem)
-# leaflet() %>%
-#   addProviderTiles("OpenStreetMap") %>%
-#   addRasterImage(cost_ghm)
-# This is a basic cost surface, In reality, people use much stronger cost surfaces. eg. running from 0-1000, and excluding areas completely which are overdeveloped. 
-
-
-# Make the 1's NA's
-#summary(cost_ghm)
-cost_ghm[cost_ghm==1] <- NA
-cost_ghm[cost_ghm==2] <- 2
-cost_ghm[cost_ghm==3] <- 5
-cost_ghm[cost_ghm==4] <- 10
-cost_ghm[cost_ghm==5] <- 50
-cost_ghm[cost_ghm==6] <- 100
-cost_ghm[cost_ghm==7] <- 150
-cost_ghm[cost_ghm==8] <- 200
-cost_ghm[cost_ghm==9] <- 600
-cost_ghm[cost_ghm==10] <- 800
-cost_ghm[cost_ghm==11] <- 1000
-
-
-```
-
-We can then add in the human modification index, and adjust the conductance scores according to the levels of human modification (1000 = high conductance, 1 = low conductance). 
-
-```{r ch3_12, echo=F}
-plot(cost_ghm)
-
-high_pa_17N <- st_transform(high_pa, 31971)
-
-```
-
-
-We can then use this to calculate the least cost path. We subsequently discovered that there are variety of packages to perform this calculation. 
-
-All packages lean on 'gdistance' to implement least cost paths. A second package, which focuses on human movement, 'leastcostpath' also provides some useful functions. 
-
-We can then pick two locations, one as a source node, the other as a destination. Lets compare two different cost surfaces, one which just has protected none protected (left) and one which incorporates HMI:
-
-```{r ch3_13, echo=F, message=F, warning=F, eval=F}
-
-#See https://rdrr.io/cran/gdistance/f/vignettes/Overview.Rmd
-
-# Convert the protected areas into 17N
-
-# https://bookdown.org/hhwagner1/LandGenCourse_book/WE_10.html
-
-# You must take your resistance raster and create a transition layer
-# NOTE gdistance creates "CONDUCTANCE" the higher the value the easier the movement
-
-# Protected not protected
-tr.cost1 <- gdistance::transition(1/cost_ras, transitionFunction=mean, directions=8) 
-
-#Note one you have your transitions layers you can add and subtract them etc. Nifty. 
-
-# HMI
-tr.cost2 <- gdistance::transition(cost_ghm, transitionFunction=mean, directions=8) 
-
-# Write these objects
-saveRDS(tr.cost1, "data/Chapter3/Transition_raster1.RDS")
-
-saveRDS(tr.cost2, "data/Chapter3/Transition_raster2.RDS")
-
-
-```
-
-```{r, echo=F}
-tr.cost1 <- readRDS( "data/Chapter3/Transition_raster1.RDS")
-tr.cost2 <- readRDS( "data/Chapter3/Transition_raster2.RDS")
-#par(mfrow=c(1,2))
-#plot(raster::raster(tr.cost1))
-#plot(raster::raster(tr.cost2))
-
-```
-
-
-
-```{r ch3_14, echo=F, message=F, warning=F, include=F}
-
-# Import the mangroves
-mangrove_17N <- st_transform(mangrove_large,31971)
-A <- as_Spatial(st_centroid(mangrove_17N[4,]))
-B <- as_Spatial(st_centroid(high_pa_17N[30,]))
-
-par(mfrow=c(1,1))
-
-plot(st_geometry(st_centroid(mangrove_17N[4,])), pch=19, col="red", xlim=c(40000,36000))
-
-plot(st_geometry(roi_17N), col="grey")
-plot(st_geometry(focal_pa_17N), col="green", add=T, border=F)
-
-plot(st_geometry(st_centroid(mangrove_17N[4,])), add=T, pch=19, col="red")
-plot(st_geometry(st_centroid(st_centroid(high_pa_17N[30,]))), add=T, pch=19, col="blue")
-
-```
-
-Setup a start and end point thenn run the calculations and plot the resulting paths:
-
-```{r ch3_15, echo =F}
-#tmp <- create_lcp(cost_surface = tr.cost1, origin=A, destination=B, direction=F)
-#plot(tmp[1,], add = T, col = "red")
-#plot(tmp[2,], add = T, col = "blue")
-
-
-########################## 
-# Also try with gDistance
-
-#costDistance(tr.cost1, fromCoords=A, 
-#                                toCoords=B)
-# Takes too long
-#rSPDistance(tr.cost1, from=A, 
-#                      to=B, 
-#            theta=1e-12, totalNet="total")
-  # Or with g distance
-lc_1 <- gdistance::shortestPath(tr.cost1, origin=A, 
-                                goal=B, output="SpatialLines")
-
-lc_2 <- gdistance::shortestPath(tr.cost2, origin=A, 
-                                goal=B, output="SpatialLines")
-
-tmp1 <- st_as_sf(lc_1)
-
-tmp2 <- st_as_sf(lc_2)
-
-# Condusctance units
-#cond_1 <- raster::extract(raster(tr.cost1), tmp1)
-#cond_2 <- raster::extract(raster(tr.cost2), tmp2)
-
-#sum(cond_1[[1]], na.rm=T)
-#sum(cond_2[[1]], na.rm=T)
-
-
-
-#costDistance(tr.cost1, fromCoords = A, 
-#                                toCoords =B)
-
-#costDistance(tr.cost2, fromCoords = A, 
-#                                toCoords =B)
-
-
-# You can also plot accumulated cost
-# plot(accCost(tr.cost1, fromCoords=A))
-# plot(accCost(tr.cost2, fromCoords=A))
-par(mfrow=c(1,2))
-par(mar=c(4,5,1,3))
-plot(raster(tr.cost1))
-plot(lc_1, col = "blue", add=T) # HAVENT EXCLUDED WATER
-
-plot(raster(tr.cost2))
-plot(lc_2, col = "red", add=T)
-
-# Extract info on the lines
-
-```
-
-As you can see the second example makes more "sense" from an animals perspective. We can also calculate the distance the line takes, for example for the protected/non-protected example it is `r round(as.numeric(st_length(tmp1))/1000,1)` km, and for the human modification index example it is `r round(as.numeric(st_length(tmp2))/1000,1)` km. 
-
-We can now design a loop to run from source locations of interest, to end nodes of interest (see Chapter 5).
 
 ## Probalistic approach
 

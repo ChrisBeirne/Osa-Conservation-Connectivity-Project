@@ -47,7 +47,7 @@ The approach we have taken in this report revolves around three key elements:
 
 It is important to note that all the assessments of connectivity here rely on habitat structural variables, rather than the movement or habitat selection of individual species, and should be interpreted as such. The surfaces will be most relevant to terrestrial, primary forest dwelling mammals.
 
-All of the data to reproduce the analysis and code in this report is stored, [in this location](https://drive.google.com/drive/folders/1DQNtNzUbqjZsT1kXZGW2fzHFFf7Y7kcZ?usp=sharing). Email [Chris Beirne](c.w.beirne@gmail.com) for access. 
+All of the data to reproduce the analysis and code in this report is stored, [in this location](https://drive.google.com/drive/folders/1DQNtNzUbqjZsT1kXZGW2fzHFFf7Y7kcZ?usp=sharing). Email [Chris Beirne](chrisbeirne@osaconservation.org) for access. 
 
 All of the underlying code and data will ultimately be available on [GitHub](https://github.com/ChrisBeirne/Osa-Conservation-Connectivity-Project). 
 

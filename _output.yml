@@ -14,5 +14,8 @@ bookdown::pdf_book:
   latex_engine: xelatex
   citation_package: natbib
   keep_tex: yes
+  output_dir:
 bookdown::epub_book: default
 bookdown::bs4_book: default
+bookdown::html_book:
+  css: toc.css

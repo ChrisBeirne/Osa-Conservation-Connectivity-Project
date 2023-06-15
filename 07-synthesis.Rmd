@@ -10,6 +10,7 @@ library(stars)
 library(nngeo)
 end_sf <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp")
 merged_shp <- st_read("data/spatial/area_of_interest/aoi.shp")
+dem_raster <- rast("data/spatial/SRTM90_V4/SRTM90_V4.elevation_all.tif")
 ```
 
 ## General conclusions
@@ -31,7 +32,7 @@ We used a least-cost-paths approach to highlight ten broad geographic regions wh
 In this exercise we only consider protected high elevation habitats. However, there is the potential for non-protected high elevation habitats to contribute to climate corridors. The plot below highlights the unprotected high elevation (>1500m) forests (>25 Mg C ha−1). 
 
 
-```{r, include=F, message=F, warning=F}
+```{r, include=F, message=F, warning=F, eval=F}
 library(terra)
 
 # Import the biomass layer
@@ -94,8 +95,16 @@ high_pa_sf <- st_intersection(high_pa_sf, merged_shp)
 high_forest_sf <- st_intersection(high_forest_sf, merged_shp)
 
 plot(high_forest_sf)
+st_write(high_forest_sf, "data/Chapter7/high_forest_sf.shp")
+
+```
 
 
+```{r, message=F, warning=F, echo=F, include=F}
+high_forest_sf <- st_read("data/Chapter7/high_forest_sf.shp")
+
+high_pa <- vect("data/spatial/area_of_interest/high_elevation_pas.shp")
+high_pa_sf <- sf::st_as_sf(high_pa)
 ```
 
 
@@ -118,11 +127,10 @@ addLegend(colors=c("red", "green"), labels = c("unprotected", "protected"),
 ```
 
 
-We estimate that (`r as.character(round(as.numeric(sum(st_area(high_pa_sf))/(1000*1000)),1))`)  km^2^ of high elevation (>1500m) forests are protected. However, substantial tracts of important forest remain unprotected (`r as.character(round(as.numeric(sum(st_area(high_forest_sf))/(1000*1000)),1)) `) km^2^, the vast majority of such forests lie in Guatemala and Honduras. There appears to be limited potential for high elevation protected area expansion outside of these counties, although some expansions may be possible around La Amistad (Costa Rica and Panama). 
 
 We can repeat this process for lowland habitat too:
 
-```{r, include=F, message=F, warning=F}
+```{r, include=F, message=F, warning=F, eval=F}
 low_raster <- dem_raster
 # Make a binary raster
 low_raster[low_raster>500] <- NA
@@ -169,17 +177,23 @@ low_pa_sf <- st_make_valid(low_pa_sf)
 low_pa_sf <- st_buffer(low_pa_sf, 0)
 
 low_forest_sf <- st_make_valid(low_forest_sf)
-low_forest_sf <- st_buffer(low_forest_sf, 0)
+#low_forest_sf <- st_buffer(low_forest_sf, 0)
 
 # Snip out mexico and columbia
 low_pa_sf <- st_intersection(low_pa_sf, merged_shp)
 low_forest_sf <- st_intersection(low_forest_sf, merged_shp)
 
 plot(low_forest_sf)
+
+st_write(low_forest_sf, "data/Chapter7/low_forest_sf.shp")
 ```
 
 
 ```{r, message=F, warning=F, echo=F}
+low_pa <- vect("data/spatial/protected_areas/lowland_protected_areas.shp")
+low_pa_sf <- sf::st_as_sf(low_pa)
+low_forest_sf <- st_read("data/Chapter7/low_forest_sf.shp")
+
 leaflet() %>%
    addProviderTiles("Esri.WorldGrayCanvas", group="Basic") %>%
    addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
@@ -196,8 +210,6 @@ addLegend(colors=c("red", "green"), labels = c("unprotected", "protected"),
     title = "low elevation forest status")
   
 ```
-
-
 
 
 ## Existing corridors

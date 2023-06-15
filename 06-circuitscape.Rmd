@@ -45,6 +45,8 @@ merged_shp <- st_read("data/spatial/area_of_interest/base_aoi.shp")
 #plot(st_geometry(merged_shp))
 roi_17N <- st_transform(merged_shp, crs=31971)
 high_pa <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp")
+high_pa_17N <- st_transform(high_pa, 31971)
+
 #plot(st_geometry(high_pa), col="green", add=T)
 
 simple_cost <- read_stars("Data/Chapter5/Low_res_resistance_surface_final.tif")
@@ -189,22 +191,6 @@ polygons <- end_ras
 # This takes a centroid of each protected area
 start_p <- centroids(start_v, inside=T)
 
-# Rather than doing the above, seed points at 1km spacing within the polygons,
-# And let them contribute equal current. It should avoid the crazy hotspots.
-
-# # Approach below in R hangs up - try in QGIS
-# library(sp)
-# # Transofrm to 17N
-# 
-# tmp <- list()
-# for(i in 654:nrow(start_sf))
-# {
-#   tmp[[i]] <- cbind(data.frame(ID=start_sf$NAME[i]),st_coordinates(st_sample(start_sf[i,], size=round(start_sf$land_size[i],0)+1, type = "regular")))
-#   print(i)
-# }
-# 
-#spaced_points <- bind_rows(tmp)
-
 spaced_points_17N <- st_read("Data/Chapter5/start_points_1km_spacing.shp")
 # Convert to points
 spaced_points_17N <- st_cast(spaced_points_17N, "POINT")
@@ -223,10 +209,6 @@ leaflet() %>%
     overlayGroups = c("starting_points", "unfiltered")) %>%
   addScaleBar()
   
-# mysample <- spsample(
-#   x = start_sp, type = "regular", cellsize = c(1000, 1000),
-#   offset = c(0.5, 0.5))# %>% as("data.frame")
-
 sources <- rasterize(spaced_points_wgs,lc, 
              field="area") # make the 
 
@@ -280,9 +262,6 @@ dir.create(paste0(path_text,"/output"))
 # > compute("pas_lowres.ini")
 
 # Runs 30 seconds on my machine - 8 parallel processes
-
-
-
 
 ```
 
@@ -396,35 +375,22 @@ res_clamp <- clamp(res_cur_norm, upper=0.5)
 res_clamp <- app(res_clamp, fun=function(x){ x[x < 0.00001] <- NA; return(x)} )
 #plot(res_clamp)
 
+res_cur_norm_mask <- mask(res_clamp, end_poly, inverse=T)
+
+
 #And the fragment importance like this:
 res_cur_norm_ras <- raster(res_clamp)
-res_cur_norm_mask <- mask(res_cur_norm_ras, end_poly, inverse=T)
 
 pal <- colorNumeric(c("#0C2C84", "#41B6C4", "#FFFFCC"), values(res_cur_norm_mask),
   na.color = "transparent")
 
 
-# leaflet() %>%
-#   addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
-#   addProviderTiles("OpenStreetMap", group="OSM") %>%
-#   addRasterImage(cost, group="Conductance") %>%
-#   addRasterImage(final_cur, group="Current", colors = pal) %>%
-#   addPolygons(data=end_sf, fillColor = "red",stroke = F, label=end_sf$NAME, fillOpacity = 1, group="Target area") %>% 
-#   addLegend(pal = pal, values = values(final_cur),
-#     title = "Current flow") %>%
-#     addPolygons(data=boundary, fillColor = "yellow",stroke = TRUE, color="red",fillOpacity = 0) %>%
-#    addLayersControl(
-#     baseGroups = c("Satellite","OSM"),
-#     overlayGroups = c("Conductance","Current", "Target area"))%>% 
-#     hideGroup("Conductance") 
-
-#plot(res_cur_norm_mask)
 leaflet() %>%
   addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
   addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
-  addRasterImage(res_cur_norm_mask, group="Raster", colors = pal) %>%  #  
-  addPolygons(data=high_poly, fillColor = "black",
-               label = high_poly$NAME, group="High_pa", stroke=F, fillOpacity = 1) %>% 
+  addRasterImage(res_cur_norm_ras, group="Raster", colors = pal) %>%  #  
+  addPolygons(data=high_pa, fillColor = "black",
+               label = high_pa$NAME, group="High_pa", stroke=F, fillOpacity = 1) %>% 
   addLayersControl(
     baseGroups = c("OSM (default)", "Satellite"),
     overlayGroups = c("Raster","High_pa")) %>%
@@ -435,7 +401,7 @@ leaflet() %>%
   #addCircleMarkers(data=tmp_end, col="black", radius=1)
 
 
-writeRaster(res_cur_norm_mask, "data/Chapter7/central_america_connectivity_normalised.tiff")
+writeRaster(res_cur_norm_mask, "data/Chapter7/central_america_connectivity_normalised.tiff", overwrite=T)
 ```
 
 
@@ -446,13 +412,13 @@ A third way in which we can use Circuitscape to understand patterns in animal co
 ```{r, echo=F, message=F, warning=F, include=F}
 # Normalised source
 res_cur_norm <- raster(res_cur_norm)
-res_cur_norm_mask_2 <- mask(res_cur_norm, end_poly_17N, inverse=F)
-res_cur_norm_mask_2
+res_cur_norm_mask_2 <- mask(res_cur_norm, high_pa, inverse=F)
+plot(res_cur_norm_mask_2)
 
 # Define a palette
 pal <- colorNumeric(c("#91bfdb", "#ffffbf", "#fc8d59"), values(res_cur_norm_mask_2),
   na.color = "transparent")
-crs(res_cur_norm_mask_2) <- "EPSG:31971"
+crs(res_cur_norm_mask_2) <- "EPSG:4326"
 
 #plot(res_cur_norm_mask_2)
 ```
@@ -478,253 +444,6 @@ leaflet() %>%
 
 This plot demonstrates that La Amistad receives input from a disproportionately high number of lowland protected areas. Other important protected areas are Sierra de las Minas in Guatamala, and Cordillera Volcanica Central in Costa Rica.  
 
-```{r, echo=T, warning=F, message=F, include=F, eval=F}
-# For each run specify a new path
-### Mangroves
-
-# Specify the focal areas
-dir.create("Data/Chapter6/Mangroves_all_low_res")
-path_text <- "Data/Chapter6/Mangroves_all_low_res"
-
-#1 Osa Peninsula
-#Read in your simple cost surface
-simple_cost <- read_stars("Data/Chapter5/Low_res_resistance_surface.tif")
-plot(simple_cost)
-
-# Read in the mangrove shapes
-res_mangrove_shp <- readRDS("data/Chapter3/lcp_test/mangroves_to_protected_shp.rds")
-
-# # Read in the mangroves
-# mangrove_large <- st_read("data/spatial/mangroves/mangrove_large_1kmsq.shp")
-# mangrove_large <- st_read("data/spatial/mangroves/mangrove_large_1kmsq.shp")
-# mangrove_large_17N <- st_transform(mangrove_large, 31971)
-
-# Read the starting polygons
-#terrestrial_node <- st_read("data/spatial/protected_areas/Terrestrial_focal_areas.shp")
-start_poly <- st_read("data/spatial/WCMC010_MangrovesUSGS2011_v1_4/clipped/mangroves_clipped.shp", quiet = TRUE)
-
-# subset to only >1km2 (the resolution of this layer)
-start_poly_17N <- st_transform(start_poly, 31971)
-start_poly <- start_poly_17N[as.numeric(st_area(start_poly_17N))>(1000*1000),]
-
-# Read in the final destinations
-end_poly <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp")
-end_poly_17N <- st_transform(end_poly, 31971)
-
-
-
-# Visualise the current paths
-plot(st_geometry(roi_17N), col="lightgrey", border=F)
-plot(st_geometry(res_mangrove_shp), add=T)
-
-res_mangrove_17N <- st_transform(res_mangrove_shp, 31971)
-
-
-# Add the protected areas
-#plot(st_geometry(terrestrial_node_17N), add=T, col="green")
-
-#head(terrestrial_node_17N)
-# Zoom into focal area
-#tmp <- terrestrial_node_17N[terrestrial_node_17N$NAME=="Corcovado",]
-
-# Buffer corcovado and pull out the closest track
-#plot(st_geometry(st_buffer(tmp,40000)))
-#plot(st_geometry(res_terrestrial_17N), add=T)
-
-#tmp <- st_buffer(tmp,40000)
-#test <- res_mangrove_17N[st_intersects(res_mangrove_17N, tmp, sparse=F),]
-# Subset to the shortest path
-#test$length<- st_length((test))
-
-#test <- test[order(test$length),]
-#test <- test[1,]
-
-# Buffer the shortest path and make that your focal landscape
-
-#plot(st_geometry(st_buffer(test, 50000)))
-#plot(st_geometry(roi_17N), add=T)
-
-# Pull this aoi and use it to crop your cost surfaces
-#aoi_test <- st_as_sfc(st_bbox(st_buffer(test, 50000)))
-
-# Now crop your focal layers to the AOI -> mangrove protected areas and endpoints
-#par(mar=c(1,1,1,1))
-#plot(st_geometry(aoi_test))
-
-
-# I have an issue where
-
-
-# Cost surface
-#cost_test <-  st_crop(simple_cost, aoi_test) 
-#plot(cost_test, add=T)  
-#write_stars(cost_test, "data/Chapter6/test1_files/cost_test.tif")
-
-# Read in in raster format
-#cellmap <- raster("data/Chapter6/test1_files/cost_test.tif")
-cellmap <- raster("Data/Chapter5/Low_res_resistance_surface.tif")
-
-NAvalue(cellmap) <- -9999
-plot(cellmap)
-
-writeRaster(cellmap, paste0(path_text,"/cellmap.asc"), overwrite=T)
-
-## Starting layers (terrestrial protected areas)
-#start_blocks <- st_intersection(terrestrial_node_17N, aoi_test) 
-start_blocks <- terrestrial_node_17N
-# n= 201
-plot(st_geometry(start_blocks), add=T, col="black")
-
-  # Read in a stars object to use as a template
-  tmp <- read_stars("Data/Chapter5/Low_res_resistance_surface.tif")
-
-  # Assign an id to the polygons
-  start_blocks$node <- 1:nrow(start_blocks)
-  start_blocks <- start_blocks[, c("node"),]
-
-  # ???Pick a random point within mangroves to start from
-  
-  start_polygons <- st_rasterize(start_blocks, template=tmp, align=T)
-  plot(start_polygons)
-
-  # Assign the starting current
-  sources<- start_polygons
-  #plot(st_centroid(start_blocks))
-  sources[sources>0] <- 1
-  plot(sources)
-
-## End layers (high elevation protected areas)
-  #end_blocks <- st_intersection(high_pa_17N, aoi_test) 
-  end_blocks <- high_pa_17N 
-  end_blocks$node<-9999
-  end_blocks <- end_blocks[, c("node")]
-  #plot(st_geometry(end_blocks), add=T, col="red")
-  end_polygons <- st_rasterize(end_blocks, template=tmp, align=T)
-
-  plot(end_polygons)
-
-## Add the resistance to the terminal location
-  grounds <- end_polygons 
-  grounds[grounds>0] <- 1  
-  
-plot(st_as_sfc(st_bbox(cellmap)))
-plot(st_as_sfc(st_bbox(start_polygons)), col=rgb(0,1,0,0.2), add=T)
-plot(st_as_sfc(st_bbox(end_polygons)), col=rgb(1,0,0,0.2), add=T)
-plot(st_as_sfc(st_bbox(sources)), col=rgb(0,0,1,0.2), add=T)
-
-# Address this issue when they are reimported as rasters
-
-write_stars(start_polygons,paste0(path_text,"/start_poly_stars.tif" ))
-write_stars(end_polygons, paste0(path_text,"/end_poly_stars.tif" ))
-write_stars(sources,paste0(path_text,"/sources_stars.tif" ))
-write_stars(grounds,paste0(path_text,"/grounds_stars.tif" ))
-
-# read them back in with the raster package
-start_polygons <- raster(paste0(path_text,"/start_poly_stars.tif"))
-end_polygons <- raster(paste0(path_text,"/end_poly_stars.tif"))
-sources_polygons <- raster(paste0(path_text,"/sources_stars.tif"))
-grounds_polygons <- raster(paste0(path_text,"/grounds_stars.tif"))
-
-# Match resolutions with the cost surface (cellmap)
-plot(cellmap)
-plot(start_polygons)
-
-start_final     <- extend(start_polygons, cellmap)
-end_final       <- extend(end_polygons, cellmap)
-sources_final   <- extend(sources_polygons, cellmap)
-grounds_final   <- extend(grounds_polygons, cellmap)
-
-
-extent(cellmap)
-extent(regions_grid_final)
-extent(sources_final)
-extent(grounds_final)
-
-# Sources is too large
-sources_final <- crop(sources_final, cellmap)
-
-# Before add them... na's must be 0's
-start_final[is.na(start_final)==T] <- 0
-end_final[is.na(end_final)==T] <- 0
-
-regions_grid_final  <- end_final+start_final
-
-# Return them to NA';'s
-regions_grid_final[regions_grid_final==0] <- NA
-plot(regions_grid_final, col="black")
-regions_grid_final <- extend(regions_grid_final, cellmap)
-
-extent(cellmap)
-extent(regions_grid_final)
-
-
-writeRaster(regions_grid_final, paste0(path_text,"/regions_grid.asc"), overwrite=T)
-writeRaster(sources_final, paste0(path_text,"/sources.asc"), overwrite=T)
-writeRaster(grounds_final, paste0(path_text,"/grounds.asc"), overwrite=T)
-
-
-dir.create(paste0(path_text,"/output"))
-
-```
-
-```{r, echo=F, message=F, warning=F, eval=F, include=F}
-
-#*IMPORTANT* Current is on a different scale to the PA analysis, it is much weaker as the source areas are much slower. 
-
-
-# Plot the result
-res_cur <- rast("data/Chapter6/Mangroves_all_low_res/output/mangroves_lowres_curmap.asc")
-# GIve it the crs
-terra::crs(res_cur) <- "EPSG:31971"
-
-end_poly <- vect("data/spatial/area_of_interest/high_elevation_pas.shp")
-end_poly_17N <- project(end_poly, "EPSG:31971")
-
-
-# Raw current
-#plot(res_cur)
-res_clamp <- clamp(res_cur, upper=10)
-# Make low current NA
-res_clamp <- app(res_clamp, fun=function(x){ x[x < 0.1] <- NA; return(x)} )
-#plot(res_clamp)
-
-
-# Masked current (no sources)
-res_clamp <- mask(res_clamp, end_poly_17N, inverse=T)
-
-
-# Check before convery to raster
-#plot(res_clamp)
-#plot(st_geometry(roi_17N), add=T)
-
-man_cond_final <- as(res_clamp, "Raster")
-
-# Reimport start and ends
-end_sf <- st_read("data/spatial/area_of_interest/high_elevation_pas.shp")
-end_sf_17N <- st_transform(end_sf, 31971)
-# pdf("data/images/pa_cur_low.pdf",height=6.5, width=8)
-# plot(res_clamp)
-# plot(st_geometry(roi_17N), add=T)
-# plot(st_geometry(end_poly_17N), add=T, col="black")
-# dev.off()
-leaflet() %>%
-  addProviderTiles("OpenStreetMap", group="OSM (default)") %>%
-  addProviderTiles("Esri.WorldImagery", group="Satellite") %>%
-  addRasterImage(man_cond_final, group="Raster") %>% 
-  addPolygons(data=end_sf, fillColor = "black",
-               label = end_sf$NAME, group="High_pa", stroke=F, fillOpacity = 1) %>% 
-  addLayersControl(
-    baseGroups = c("OSM (default)", "Satellite"),
-    overlayGroups = c("Raster","High_pa")) #%>%
-  #addPolylines(data=tmp_lcp, weight = 2, fillColor = "blue",
-   #            label = tmp_lcp$ID)# %>% 
-  #addCircleMarkers(data=tmp_end, col="black", radius=1)
-
-
-writeRaster(man_cond_final, "data/Chapter7/Conductivity_man_high_100m_res.tif", overwrite=T)
-
-
-```
 
 ### Fine scale (100m)
 
