@@ -88,15 +88,14 @@ dir.create("data")
 dir.create("data/input")
 dir.create("data/output")
 
-# # Download and unzip the contents of the following and place it into the data/input folder
-# https://drive.google.com/drive/folders/1YO0y73_jQ7Mo1fOnoI5EhCUDk5K9JEva
+# # Download (click the downward arrow next to the input tab and click download) and unzip the contents of the following and place it into the data/input folder
+# https://drive.google.com/drive/folders/1ObzVyAOO5ganXkaJL7pf_I6vWRV5rv_G
 
-# # Download and unzip the contents of the following and put it in the data/output folder
-# https://drive.google.com/drive/folders/1GjkcCk8bOopJheYSE5H2VVqD9o5svO9R
+# # Download (click the downward arrow next to the output tab and click download) and unzip the contents of the following and put it in the data/output folder
+# https://drive.google.com/drive/folders/14qLQDQtLwCB7cjHBJc6pokLKdnRIEoop
 
-
-###############
-# ARCHIVED BELOW #
+#######################
+# ARCHIVED CODE BELOW #
 
 # I previously used the google drive function to download all the data
 # Now things have become more complex, this has become obselete [Below]
@@ -164,16 +163,6 @@ dir.create("data/output")
 # }
 # 
 # 
-# # Download the low res version of Land cover map too
-# jp_folder = "https://drive.google.com/drive/folders/1YYaJ01gIMD9qs8cxKYqWmPk_lzyStDWy"
-# folder_id = drive_get(as_id(jp_folder))
-# files = drive_ls(folder_id)
-# for(i in 1:length(files))
-# {
-# drive_download(
-#         as_id(files$id[i]),
-#         path = paste0("data/input/landcover/", files$name[i]))
-# }
 
 ```
 
