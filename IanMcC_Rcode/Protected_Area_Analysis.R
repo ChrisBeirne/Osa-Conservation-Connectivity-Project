@@ -1,6 +1,6 @@
 ################## Central American protected area analysis #######################
 # Date: 6-21-23
-# updated: 6-22-23
+# updated: 7-11-23
 # Author: Ian McCullough, immccull@gmail.com
 ###################################################################################
 
@@ -29,6 +29,17 @@ focal_pa <- focal_pa %>% st_sf() %>%  st_cast()
 all_countries_shp <- st_transform(all_countries_shp, st_crs(4326))
 focal_countries_shp <- st_transform(focal_countries_shp, st_crs(4326))
 aoi <- st_transform(aoi, st_crs(4326))
+
+# lowland PAs
+lowland_pa <- st_read("data/spatial/protected_areas/lowland_protected_areas.shp", quiet = TRUE)
+lowland_pa <- st_transform(lowland_pa, st_crs(4326))
+lowland_pa_vect <- terra::vect(lowland_pa)
+lowland_pa_vect <- terra::project(lowland_pa_vect, "EPSG:31971")
+
+# climate and elevation data
+srtm_all <- terra::rast("data/spatial/SRTM90_V4/SRTM90_V4.elevation_all.tif")
+MAT <- terra::rast("data/WorldClim/wc2.1_30s_bio/wc2.1_30s_bio_1.tif")
+MAP <- terra::rast("data/WorldClim/wc2.1_30s_bio/wc2.1_30s_bio_12.tif")
 
 ##### Main program #####
 # filter protected areas
@@ -331,10 +342,12 @@ contiguous_PA_area_stats <- as.data.frame(contiguous_PA_area_stats)
 #write.csv(contiguous_PA_area_stats, file='Tables_Figures/contiguous_PA_area_stats.csv', row.names=F)
 
 ##### Representation of PAs along climate/elevational gradients #####
-srtm_all <- terra::rast("data/spatial/SRTM90_V4/SRTM90_V4.elevation_all.tif")
 srtm_all_proj <- terra::project(srtm_all, "EPSG:31971", 
                                 method='average', res=c(90,90))
 srtm_all_proj_mask <- terra::mask(srtm_all_proj, aoi_vect, inverse=F)
+
+#srtm_all_proj_mask_slope <- terra::terrain(srtm_all_proj_mask, v='slope', unit='degrees', neighbors=8)
+#plot(srtm_all_proj_mask_slope) #doesn't work (memory issue?)
 
 # not sure why it reports all values instead of the mean as specified, but this is OK
 focal_pa_elev_mean <- terra::extract(srtm_all_proj, pa_dissolved, fun=mean, na.rm=T)
@@ -356,10 +369,7 @@ hist(focal_pa_elev$median_m)
 hist(focal_pa_elev$range_m)
 
 ## same for climate data
-MAT <- terra::rast("data/WorldClim/wc2.1_30s_bio/wc2.1_30s_bio_1.tif")
-MAP <- terra::rast("data/WorldClim/wc2.1_30s_bio/wc2.1_30s_bio_12.tif")
-
-# prepare/reproject data ot UTM 17N
+# prepare/reproject data to UTM 17N
 MAT_masked <- terra::mask(MAT, aoi, inverse=F) 
 MAT_cropped <- terra::crop(MAT_masked, aoi)
 MAT_cropped <- terra::project(MAT_cropped, "EPSG:31971", 
@@ -556,3 +566,202 @@ hist(focal_pa_elev_clim$mean_MAT)
 # # seems like an issue with the underlying polygons from WDPA
 # test <- st_intersects(focal_pa, aoi)
 
+### Analysis of lowland protected area elevation and climate ###
+# be sure to load and process (i.e., mask, crop, project) elevation and climate data above
+
+lowland_pa_MAT <- terra::extract(MAT_cropped, lowland_pa_vect, fun=mean, na.rm=T)
+lowland_pa_MAP <- terra::extract(MAP_cropped, lowland_pa_vect, fun=mean, na.rm=T)
+lowland_pa_elev <- terra::extract(srtm_all_proj_mask, lowland_pa_vect, fun=mean, na.rm=T)
+
+lowland_pa_MAT_min <- terra::extract(MAT_cropped, lowland_pa_vect, fun=min, na.rm=T)
+lowland_pa_MAP_min <- terra::extract(MAP_cropped, lowland_pa_vect, fun=min, na.rm=T)
+lowland_pa_elev_min <- terra::extract(srtm_all_proj_mask, lowland_pa_vect, fun=min, na.rm=T)
+
+lowland_pa_MAT_max <- terra::extract(MAT_cropped, lowland_pa_vect, fun=max, na.rm=T)
+lowland_pa_MAP_max <- terra::extract(MAP_cropped, lowland_pa_vect, fun=max, na.rm=T)
+lowland_pa_elev_max <- terra::extract(srtm_all_proj_mask, lowland_pa_vect, fun=max, na.rm=T)
+
+colnames(lowland_pa_MAT) <- c('ID','meanMAT_C')
+colnames(lowland_pa_MAP) <- c('ID','meanMAP_mm')
+colnames(lowland_pa_elev) <- c('ID','meanElev_m')
+
+colnames(lowland_pa_MAT_min) <- c('ID','minMAT_C')
+colnames(lowland_pa_MAP_min) <- c('ID','minMAP_mm')
+colnames(lowland_pa_elev_min) <- c('ID','minElev_m')
+
+colnames(lowland_pa_MAT_max) <- c('ID','maxMAT_C')
+colnames(lowland_pa_MAP_max) <- c('ID','maxMAP_mm')
+colnames(lowland_pa_elev_max) <- c('ID','maxElev_m')
+
+lowland_pa_clim_elev <- cbind.data.frame(lowland_pa_MAT, lowland_pa_MAT_min, lowland_pa_MAT_max,
+                                         lowland_pa_MAP, lowland_pa_MAP_min, lowland_pa_MAP_max,
+                                         lowland_pa_elev, lowland_pa_elev_min, lowland_pa_elev_max)
+lowland_pa_clim_elev$rangeMAT_C <- lowland_pa_clim_elev$maxMAT_C - lowland_pa_clim_elev$minMAT_C
+lowland_pa_clim_elev$rangeMAP_mm <- lowland_pa_clim_elev$maxMAP_mm - lowland_pa_clim_elev$minMAP_mm
+lowland_pa_clim_elev$rangeElev_m <- lowland_pa_clim_elev$maxElev_m - lowland_pa_clim_elev$minElev_m
+lowland_pa_clim_elev <- lowland_pa_clim_elev[,c(1,2,4,6,8,10,12,14,16,18,19,20,21)]
+
+lowland_pa_clim_elev_att <- cbind.data.frame(lowland_pa_clim_elev, lowland_pa)
+
+# assign PA in CRI and Panama to CRI (mostly in CRI)
+lowland_pa_clim_elev_att$ISO3 <- ifelse(lowland_pa_clim_elev_att$ISO3=='CRI;PAN', 'CRI', lowland_pa_clim_elev_att$ISO3)
+
+## create multipanel plot
+lowland_pa_rangeMAT_plot <- ggplot(data=as.data.frame(lowland_pa_clim_elev_att), aes(y=rangeMAT_C, x=ISO3, fill=ISO3)) +
+  geom_boxplot()+
+  theme_classic()+
+  theme(axis.text.x=element_text(color='black'),
+        axis.text.y=element_text(color='black'),
+        axis.title.x=element_blank(),
+        legend.position=c('none'))+
+  scale_y_continuous(name='Temperature (C)', limits=c())+
+  #scale_x_discrete(name='Country')+
+  scale_fill_manual(values=country_colors)+
+  ggtitle("Temperature range")
+
+lowland_pa_meanMAT_plot <- ggplot(data=as.data.frame(lowland_pa_clim_elev_att), aes(y=meanMAT_C, x=ISO3, fill=ISO3)) +
+  geom_boxplot()+
+  theme_classic()+
+  theme(axis.text.x=element_text(color='black'),
+        axis.text.y=element_text(color='black'),
+        axis.title.x=element_blank(),
+        legend.position=c('none'))+
+  scale_y_continuous(name='Temperature (C)', limits=c())+
+  #scale_x_discrete(name='Country')+
+  scale_fill_manual(values=country_colors)+
+  ggtitle("Temperature mean")
+
+
+lowland_pa_rangeMAP_plot <- ggplot(data=as.data.frame(lowland_pa_clim_elev_att), aes(y=rangeMAP_mm, x=ISO3, fill=ISO3)) +
+  geom_boxplot()+
+  theme_classic()+
+  theme(axis.text.x=element_text(color='black'),
+        axis.text.y=element_text(color='black'),
+        axis.title.x=element_blank(),
+        legend.position=c('none'))+
+  scale_y_continuous(name='Precipitation (mm)', limits=c())+
+  #scale_x_discrete(name='Country')+
+  scale_fill_manual(values=country_colors)+
+  ggtitle("Precipitation range")
+
+lowland_pa_meanMAP_plot <- ggplot(data=as.data.frame(lowland_pa_clim_elev_att), aes(y=meanMAP_mm, x=ISO3, fill=ISO3)) +
+  geom_boxplot()+
+  theme_classic()+
+  theme(axis.text.x=element_text(color='black'),
+        axis.text.y=element_text(color='black'),
+        axis.title.x=element_blank(),
+        legend.position=c('none'))+
+  scale_y_continuous(name='Precipitation (mm)', limits=c())+
+  #scale_x_discrete(name='Country')+
+  scale_fill_manual(values=country_colors)+
+  ggtitle("Precipitation mean")
+
+
+lowland_pa_rangeElev_plot <- ggplot(data=as.data.frame(lowland_pa_clim_elev_att), aes(y=rangeElev_m, x=ISO3, fill=ISO3)) +
+  geom_boxplot()+
+  theme_classic()+
+  theme(axis.text.x=element_text(color='black'),
+        axis.text.y=element_text(color='black'),
+        axis.title.x=element_blank(),
+        legend.position=c('none'))+
+  scale_y_continuous(name='Elevation (m)', limits=c())+
+  #scale_x_discrete(name='Country')+
+  scale_fill_manual(values=country_colors)+
+  ggtitle("Elevation range")
+
+lowland_pa_meanElev_plot <- ggplot(data=as.data.frame(lowland_pa_clim_elev_att), aes(y=meanElev_m, x=ISO3, fill=ISO3)) +
+  geom_boxplot()+
+  theme_classic()+
+  theme(axis.text.x=element_text(color='black'),
+        axis.text.y=element_text(color='black'),
+        axis.title.x=element_blank(),
+        legend.position=c('none'))+
+  scale_y_continuous(name='Elevation (m)', limits=c())+
+  #scale_x_discrete(name='Country')+
+  scale_fill_manual(values=country_colors)+
+  ggtitle("Elevation mean")
+
+grid.arrange(lowland_pa_rangeElev_plot, lowland_pa_meanElev_plot,
+             lowland_pa_rangeMAT_plot, lowland_pa_meanMAT_plot,
+             lowland_pa_rangeMAP_plot, lowland_pa_meanMAP_plot,
+             nrow=3)
+
+#### Representativeness of elevational zones in PAs ####
+# mat <- c(-10,1000,1,
+#          1000,2000,2,
+#          2000,3000,3,
+#          3000,4000,4)
+mat <- c(-10,1000,1,
+          1000,5000,NA)
+rclmat <- matrix(mat, ncol=3, byrow=T)
+sub1000m <- terra::classify(srtm_all_proj_mask, rclmat, include.lowest=T)
+plot(sub1000m)
+
+# if use fun=table, output format is a bit weird; looks like it counts number of cells in each class
+# but wouldn't there be some with multiple classes? (maybe not if only use lowland PAs!)
+elevzone <- terra::extract(sub1000m, focal_pa_vect, fun=sum)
+#df <- as.data.frame(elevzone)
+names(elevzone) <- c('ID','elevsub1000m')
+
+## 1000-2000m
+mat <- c(-10,1000,NA,
+         1000,2000,1,
+         2000,5000,NA)# had 5000 as 4000, as max of SRTM raster was under 4000, but somehow still turning up values over 4000?
+rclmat <- matrix(mat, ncol=3, byrow=T)
+sub2000m <- terra::classify(srtm_all_proj_mask, rclmat, include.lowest=T)
+plot(sub2000m)
+
+elevzone2000 <- terra::extract(sub2000m, focal_pa_vect, fun=sum)
+names(elevzone2000) <- c('ID','elev10002000m')
+
+
+## 2000-3000m
+mat <- c(-10,2000,NA,
+         2000,3000,1,
+         3000,5000,NA)
+rclmat <- matrix(mat, ncol=3, byrow=T)
+sub3000m <- terra::classify(srtm_all_proj_mask, rclmat, include.lowest=T)
+plot(sub3000m)
+
+elevzone3000 <- terra::extract(sub3000m, focal_pa_vect, fun=sum)
+names(elevzone3000) <- c('ID','elev20003000m')
+
+## 3000-4000m
+mat <- c(-10,3000,NA,
+         3000,5000,1)
+rclmat <- matrix(mat, ncol=3, byrow=T)
+sub4000m <- terra::classify(srtm_all_proj_mask, rclmat, include.lowest=T)
+plot(sub4000m)
+
+elevzone4000 <- terra::extract(sub4000m, focal_pa_vect, fun=sum)
+names(elevzone4000) <- c('ID','elev30004000m')
+
+# this is number of cells per PA in each elevational zone
+# would need to multiply by cell area (8900 m2) to get area
+# then bring in PA area
+# would still need to calculate total area per elevational zone; could use freq of reclassified raster to get cell counts in each elevational zone
+df_list <- list(elevzone, elevzone2000, elevzone3000, elevzone4000)
+elevzone_all <- df_list %>% reduce(full_join, by='ID')
+
+elevzone_all$elevsub1000m_m2 <- elevzone_all$elevsub1000m*8900
+elevzone_all$elev10002000m_m2 <- elevzone_all$elev10002000m * 8900
+elevzone_all$elev20003000m_m2 <- elevzone_all$elev20003000m * 8900
+elevzone_all$elev30004000m_m2 <- elevzone_all$elev30004000m * 8900
+
+# PA areas #note: may want to switch to equal area projection
+focal_pa_vect_area <- as.data.frame(terra::expanse(focal_pa_vect, unit='m'))
+colnames(focal_pa_vect_area) <- 'PA_area_m2'
+
+# elevational zone area
+elevzone_area <- data.frame(elevzone=c('elevsub1000m','elev10002000m',
+                                       'elev20003000m', 'elev30004000m'),
+                            area_m2=NA)
+
+elevzone_area[1,2] <- freq(sub1000m)[3]
+elevzone_area[2,2] <- freq(sub2000m)[3]
+elevzone_area[3,2] <- freq(sub3000m)[3]
+elevzone_area[4,2] <- freq(sub4000m)[3]
+
+## get proportions protected across elev zones
+# need to sum up PA by zone!
+#elevzone_all$prop_sub1000m <- elevzone_all$elevsub1000m_m2 / elevzone_area[1,2]
